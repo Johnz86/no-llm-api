@@ -46,13 +46,24 @@ impl ChatService {
 
     pub async fn create_completion(&self, request: ChatCompletionRequest) -> PreparedCompletion {
         let store_enabled = request.store.unwrap_or(false);
-        let script_index = self.rotation.fetch_add(1, Ordering::Relaxed) % self.scripts.len();
-        let script = &self.scripts[script_index];
-        let turn_index = self.cursors[script_index].fetch_add(1, Ordering::Relaxed);
-        let assistant_content = script.assistant_at(turn_index).to_string();
 
-        let completion_tokens = tokenize(&assistant_content);
-        let completion_token_count = completion_tokens.len() as u32;
+        let (assistant_content, tokens) = match self.match_assistant_response(&request) {
+            Some(content) => {
+                let tokens = tokenize(&content);
+                (content, tokens)
+            }
+            None => {
+                let script_index =
+                    self.rotation.fetch_add(1, Ordering::Relaxed) % self.scripts.len();
+                let script = &self.scripts[script_index];
+                let turn_index = self.cursors[script_index].fetch_add(1, Ordering::Relaxed);
+                let content = script.assistant_at(turn_index).to_string();
+                let tokens = tokenize(&content);
+                (content, tokens)
+            }
+        };
+
+        let completion_token_count = tokens.len() as u32;
         let prompt_tokens = count_prompt_tokens(&request.messages);
         let usage = ChatCompletionUsage {
             prompt_tokens,
@@ -99,10 +110,7 @@ impl ChatService {
             self.store.save(response.clone(), stored_messages).await;
         }
 
-        PreparedCompletion {
-            response,
-            tokens: completion_tokens,
-        }
+        PreparedCompletion { response, tokens }
     }
 
     pub async fn list(
@@ -138,6 +146,15 @@ impl ChatService {
         limit: usize,
     ) -> Option<Vec<StoredMessage>> {
         self.store.messages(id, order, after, limit).await
+    }
+
+    fn match_assistant_response(&self, request: &ChatCompletionRequest) -> Option<String> {
+        let user_message = last_user_message(&request.messages)?;
+        self.scripts.iter().find_map(|script| {
+            script
+                .response_for_user(&user_message)
+                .map(|text| text.to_string())
+        })
     }
 }
 
@@ -196,6 +213,19 @@ fn unix_timestamp() -> i64 {
         .as_secs() as i64
 }
 
+fn last_user_message(messages: &[ChatCompletionRequestMessage]) -> Option<String> {
+    messages.iter().rev().find_map(|message| {
+        if matches!(message.role, ChatRole::User) {
+            message
+                .content
+                .as_ref()
+                .map(|content| content.render().into_owned())
+        } else {
+            None
+        }
+    })
+}
+
 pub fn chunk_from_delta(
     response: &ChatCompletionResponse,
     delta: ChatCompletionChunkDelta,
@@ -244,12 +274,12 @@ mod tests {
     };
     use tempfile::tempdir;
 
-    fn sample_request() -> ChatCompletionRequest {
+    fn request_with_text(text: &str) -> ChatCompletionRequest {
         ChatCompletionRequest {
             model: "test-model".to_string(),
             messages: vec![ChatCompletionRequestMessage {
                 role: ChatRole::User,
-                content: Some(MessageContent::Text("hello".to_string())),
+                content: Some(MessageContent::Text(text.to_string())),
                 name: None,
                 tool_calls: None,
                 function_call: None,
@@ -279,7 +309,7 @@ mod tests {
         let scripts = ConversationScripts::load(&path).unwrap();
         let service = ChatService::new(scripts, NonZeroU32::new(5).unwrap());
 
-        let request = sample_request();
+        let request = request_with_text("hello");
         let result = service.create_completion(request.clone()).await;
         assert!(!result.tokens.is_empty());
         let stored = service.list(SortOrder::Ascending, None, 10).await;
@@ -292,5 +322,25 @@ mod tests {
         assert_eq!(stored.len(), 1);
         let retrieved = service.get(&stored_result.response.id).await.unwrap();
         assert_eq!(retrieved.completion.id, stored_result.response.id);
+    }
+
+    #[tokio::test]
+    async fn matches_user_prompt_to_dataset() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("sample.parquet");
+        ensure_sample_dataset(&path).unwrap();
+        let scripts = ConversationScripts::load(&path).unwrap();
+        let service = ChatService::new(scripts, NonZeroU32::new(30).unwrap());
+
+        let request = request_with_text("Summarize the sprint update.");
+        let result = service.create_completion(request).await;
+        let response_text = match &result.response.choices[0].message.content {
+            Some(MessageContent::Text(text)) => text.as_str(),
+            _ => panic!("unexpected response type"),
+        };
+        assert_eq!(
+            response_text,
+            "Sprint closed 14 tickets, shipped analytics, and stabilized the API."
+        );
     }
 }

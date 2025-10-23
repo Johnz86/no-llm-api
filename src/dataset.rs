@@ -45,16 +45,32 @@ impl ConversationScripts {
         let mut scripts = Vec::new();
         for (conversation_id, mut turns) in grouped {
             turns.sort_by_key(|turn| turn.turn_index);
-            let assistant_turns: Vec<Arc<str>> = turns
+
+            let mut conversation_turns = Vec::with_capacity(turns.len());
+            for raw in turns {
+                let role = ConversationRole::from(raw.role.as_str());
+                let content: Arc<str> = Arc::<str>::from(raw.content);
+                conversation_turns.push(ConversationTurn {
+                    role,
+                    content: content.clone(),
+                });
+            }
+
+            let assistant_turns: Vec<Arc<str>> = conversation_turns
                 .iter()
-                .filter(|turn| turn.role == "assistant")
-                .map(|turn| Arc::<str>::from(turn.content.clone()))
+                .filter_map(|turn| match turn.role {
+                    ConversationRole::Assistant => Some(turn.content.clone()),
+                    _ => None,
+                })
                 .collect();
+
             if assistant_turns.is_empty() {
                 continue;
             }
+
             scripts.push(ConversationScript {
                 id: Arc::<str>::from(conversation_id),
+                turns: conversation_turns.into(),
                 assistant_turns: assistant_turns.into(),
             });
         }
@@ -77,6 +93,7 @@ impl ConversationScripts {
 #[derive(Clone)]
 pub struct ConversationScript {
     pub id: Arc<str>,
+    turns: Arc<[ConversationTurn]>,
     assistant_turns: Arc<[Arc<str>]>,
 }
 
@@ -84,6 +101,55 @@ impl ConversationScript {
     pub fn assistant_at(&self, index: usize) -> Arc<str> {
         let idx = index % self.assistant_turns.len();
         self.assistant_turns[idx].clone()
+    }
+
+    pub fn response_for_user(&self, user_text: &str) -> Option<Arc<str>> {
+        let needle = Self::normalize(user_text);
+        for (idx, turn) in self.turns.iter().enumerate() {
+            if !matches!(turn.role, ConversationRole::User) {
+                continue;
+            }
+            if Self::normalize(turn.content.as_ref()) == needle {
+                return self
+                    .turns
+                    .iter()
+                    .skip(idx + 1)
+                    .find(|next| matches!(next.role, ConversationRole::Assistant))
+                    .map(|next| next.content.clone());
+            }
+        }
+        None
+    }
+
+    fn normalize(text: &str) -> String {
+        text.trim().to_ascii_lowercase()
+    }
+}
+
+#[derive(Clone)]
+pub struct ConversationTurn {
+    pub role: ConversationRole,
+    pub content: Arc<str>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ConversationRole {
+    System,
+    User,
+    Assistant,
+    Tool,
+    Unknown,
+}
+
+impl ConversationRole {
+    fn from(value: &str) -> Self {
+        match value {
+            "system" => Self::System,
+            "user" => Self::User,
+            "assistant" => Self::Assistant,
+            "tool" => Self::Tool,
+            _ => Self::Unknown,
+        }
     }
 }
 
