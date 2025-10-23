@@ -175,9 +175,14 @@ fn count_prompt_tokens(messages: &[ChatCompletionRequestMessage]) -> u32 {
 }
 
 fn tokenize(text: &str) -> Vec<String> {
-    text.split_whitespace()
-        .map(|token| token.to_string())
-        .collect()
+    let mut tokens: Vec<String> = text
+        .split_whitespace()
+        .flat_map(|s| [s.to_string(), " ".to_string()])
+        .collect();
+    if !tokens.is_empty() {
+        tokens.pop();
+    }
+    tokens
 }
 
 fn count_tokens(text: &str) -> u32 {

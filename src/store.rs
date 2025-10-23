@@ -138,3 +138,157 @@ impl StoredCompletion {
         self.completion.clone()
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{
+        ChatCompletionChoice, ChatCompletionResponseMessage, ChatCompletionUsage, ChatRole,
+        MessageContent,
+    };
+    use serde_json::{Map, json};
+
+    fn sample_response(id: &str, created: i64) -> ChatCompletionResponse {
+        ChatCompletionResponse {
+            id: id.to_string(),
+            object: "chat.completion".to_string(),
+            created,
+            model: "test-model".to_string(),
+            usage: ChatCompletionUsage {
+                prompt_tokens: 2,
+                completion_tokens: 3,
+                total_tokens: 5,
+            },
+            choices: vec![ChatCompletionChoice {
+                index: 0,
+                message: ChatCompletionResponseMessage {
+                    role: ChatRole::Assistant,
+                    content: Some(MessageContent::Text("ok".to_string())),
+                    refusal: None,
+                    tool_calls: None,
+                    function_call: None,
+                    audio: None,
+                },
+                finish_reason: "stop".to_string(),
+                logprobs: None,
+            }],
+            metadata: None,
+            system_fingerprint: Some("fp_test".to_string()),
+            service_tier: Some("default".to_string()),
+            tool_choice: None,
+            response_format: None,
+        }
+    }
+
+    fn sample_messages(root: &str) -> Vec<StoredMessage> {
+        vec![
+            StoredMessage {
+                id: format!("{root}-0"),
+                role: ChatRole::User,
+                content: Some(MessageContent::Text("hi".to_string())),
+                name: None,
+            },
+            StoredMessage {
+                id: format!("{root}-1"),
+                role: ChatRole::Assistant,
+                content: Some(MessageContent::Text("ok".to_string())),
+                name: None,
+            },
+        ]
+    }
+
+    #[tokio::test]
+    async fn list_respects_order_and_pagination() {
+        let store = CompletionStore::new();
+        store
+            .save(sample_response("a", 1), sample_messages("a"))
+            .await;
+        store
+            .save(sample_response("b", 2), sample_messages("b"))
+            .await;
+        store
+            .save(sample_response("c", 3), sample_messages("c"))
+            .await;
+
+        let asc = store
+            .list(SortOrder::Ascending, None, 2)
+            .await
+            .into_iter()
+            .map(|item| item.completion.id)
+            .collect::<Vec<_>>();
+        assert_eq!(asc, vec!["a", "b"]);
+
+        let desc = store
+            .list(SortOrder::Descending, None, 2)
+            .await
+            .into_iter()
+            .map(|item| item.completion.id)
+            .collect::<Vec<_>>();
+        assert_eq!(desc, vec!["c", "b"]);
+
+        let after = store
+            .list(SortOrder::Ascending, Some("a"), 2)
+            .await
+            .into_iter()
+            .map(|item| item.completion.id)
+            .collect::<Vec<_>>();
+        assert_eq!(after, vec!["b", "c"]);
+    }
+
+    #[tokio::test]
+    async fn messages_follow_ordering() {
+        let store = CompletionStore::new();
+        store
+            .save(sample_response("chat", 1), sample_messages("chat"))
+            .await;
+
+        let asc = store
+            .messages("chat", SortOrder::Ascending, None, 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|message| message.id)
+            .collect::<Vec<_>>();
+        assert_eq!(asc, vec!["chat-0", "chat-1"]);
+
+        let desc = store
+            .messages("chat", SortOrder::Descending, None, 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|message| message.id)
+            .collect::<Vec<_>>();
+        assert_eq!(desc, vec!["chat-1", "chat-0"]);
+
+        let after = store
+            .messages("chat", SortOrder::Ascending, Some("chat-0"), 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|message| message.id)
+            .collect::<Vec<_>>();
+        assert_eq!(after, vec!["chat-1"]);
+    }
+
+    #[tokio::test]
+    async fn update_metadata_overwrites() {
+        let store = CompletionStore::new();
+        store
+            .save(sample_response("meta", 42), sample_messages("meta"))
+            .await;
+
+        let mut metadata = Map::new();
+        metadata.insert("key".to_string(), json!(1));
+        store.update_metadata("meta", metadata).await.unwrap();
+
+        let updated = store.get("meta").await.unwrap();
+        assert_eq!(
+            updated
+                .completion
+                .metadata
+                .as_ref()
+                .and_then(|map| map.get("key"))
+                .and_then(|value| value.as_i64()),
+            Some(1)
+        );
+    }
+}

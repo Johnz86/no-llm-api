@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 axum = { version = "0.7", features = ["macros", "json", "tokio"] }
-tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "time", "signal"] }
+tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "time", "signal", "fs"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"

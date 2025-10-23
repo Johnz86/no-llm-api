@@ -6,7 +6,7 @@ use std::time::Duration;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::response::{IntoResponse, Response};
+use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
@@ -43,7 +43,17 @@ pub fn build_router(service: Arc<ChatService>) -> Router {
         )
         .with_state(state.clone());
 
-    Router::new().merge(routes.clone()).nest("/v1", routes)
+    Router::new()
+        .route("/", get(serve_index))
+        .merge(routes.clone())
+        .nest("/v1", routes)
+}
+
+async fn serve_index() -> impl IntoResponse {
+    match tokio::fs::read_to_string("index.html").await {
+        Ok(content) => Html(content).into_response(),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "index.html not found").into_response(),
+    }
 }
 
 async fn list_chat_completions(

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #1a1a1a;
+            color: #f0f0f0;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #chat-container {
+            width: 80%;
+            max-width: 800px;
+            height: 90vh;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid #333;
+            border-radius: 8px;
+            overflow: hidden;
+            background-color: #2a2a2a;
+        }
+
+        #chat-messages {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .message {
+            padding: 10px 15px;
+            border-radius: 18px;
+            max-width: 70%;
+            line-height: 1.5;
+        }
+
+        .user-message {
+            background-color: #007bff;
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+        }
+
+        .assistant-message {
+            background-color: #444;
+            color: #f0f0f0;
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+        }
+
+        #chat-input {
+            display: flex;
+            padding: 20px;
+            border-top: 1px solid #333;
+        }
+
+        #message-input {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #555;
+            border-radius: 5px;
+            background-color: #333;
+            color: #f0f0f0;
+            font-size: 16px;
+        }
+
+        #send-button {
+            padding: 10px 20px;
+            margin-left: 10px;
+            border: none;
+            border-radius: 5px;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        #send-button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div id="chat-container">
+        <div id="chat-messages"></div>
+        <div id="chat-input">
+            <input type="text" id="message-input" placeholder="Type your message...">
+            <button id="send-button">Send</button>
+        </div>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const chatMessages = document.getElementById('chat-messages');
+            const messageInput = document.getElementById('message-input');
+            const sendButton = document.getElementById('send-button');
+
+            const addMessage = (role, content) => {
+                const messageElement = document.createElement('div');
+                messageElement.classList.add('message', role === 'user' ? 'user-message' : 'assistant-message');
+                messageElement.textContent = content;
+                chatMessages.appendChild(messageElement);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+                return messageElement;
+            };
+
+            const sendMessage = async () => {
+                const message = messageInput.value.trim();
+                if (!message) return;
+
+                addMessage('user', message);
+                messageInput.value = '';
+
+                const assistantMessageElement = addMessage('assistant', '');
+
+                try {
+                    const response = await fetch('/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            model: 'test-model',
+                            messages: [{ role: 'user', content: message }],
+                            stream: true,
+                        }),
+                    });
+
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        buffer += decoder.decode(value, { stream: true });
+                        
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop(); 
+
+                        for (const line of lines) {
+                            if (line.startsWith('data:')) {
+                                const data = line.substring(5).trim();
+                                if (data === '[DONE]') {
+                                    return;
+                                }
+                                try {
+                                    const chunk = JSON.parse(data);
+                                    if (chunk.choices && chunk.choices[0].delta.content) {
+                                        assistantMessageElement.textContent += chunk.choices[0].delta.content;
+                                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                                    }
+                                } catch (error) {
+                                    console.error('Error parsing stream data:', error);
+                                }
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error fetching chat completion:', error);
+                    assistantMessageElement.textContent = 'Error: Could not connect to the service.';
+                }
+            };
+
+            sendButton.addEventListener('click', sendMessage);
+            messageInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    sendMessage();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
