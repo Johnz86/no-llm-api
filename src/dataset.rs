@@ -10,6 +10,7 @@ use arrow_schema::{ArrowError, DataType, Field, Schema};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::arrow_writer::ArrowWriter;
 use thiserror::Error;
+use tiktoken_rs::CoreBPE;
 
 /// Represents failures that can happen when working with the parquet dataset.
 #[derive(Debug, Error)]
@@ -31,13 +32,13 @@ pub struct ConversationScripts {
 }
 
 impl ConversationScripts {
-    pub fn load(path: &Path) -> Result<Self, DatasetError> {
+    pub fn load(path: &Path, tokenizer: &Arc<CoreBPE>) -> Result<Self, DatasetError> {
         let file = File::open(path)?;
         let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
-        let mut reader = builder.with_batch_size(256).build()?;
+        let reader = builder.with_batch_size(256).build()?;
         let mut grouped: HashMap<String, Vec<RawTurn>> = HashMap::new();
 
-        while let Some(batch) = reader.next() {
+        for batch in reader {
             let batch = batch?;
             ingest_batch(&mut grouped, &batch)?;
         }
@@ -46,32 +47,42 @@ impl ConversationScripts {
         for (conversation_id, mut turns) in grouped {
             turns.sort_by_key(|turn| turn.turn_index);
 
+            let id = Arc::<str>::from(conversation_id);
             let mut conversation_turns = Vec::with_capacity(turns.len());
+            let mut assistants = Vec::new();
+
             for raw in turns {
                 let role = ConversationRole::from(raw.role.as_str());
                 let content: Arc<str> = Arc::<str>::from(raw.content);
+                let assistant_index = if matches!(role, ConversationRole::Assistant) {
+                    let tokens = tokenizer.encode_with_special_tokens(content.as_ref());
+                    let message = AssistantMessage {
+                        text: content.clone(),
+                        tokens: Arc::from(tokens.into_boxed_slice()),
+                    };
+                    assistants.push(message);
+                    Some(assistants.len() - 1)
+                } else {
+                    None
+                };
+
                 conversation_turns.push(ConversationTurn {
                     role,
                     content: content.clone(),
+                    assistant_index,
                 });
             }
 
-            let assistant_turns: Vec<Arc<str>> = conversation_turns
-                .iter()
-                .filter_map(|turn| match turn.role {
-                    ConversationRole::Assistant => Some(turn.content.clone()),
-                    _ => None,
-                })
-                .collect();
-
-            if assistant_turns.is_empty() {
+            if assistants.is_empty() {
                 continue;
             }
 
+            let turns: Arc<[ConversationTurn]> = conversation_turns.into();
+            let assistants: Arc<[AssistantMessage]> = assistants.into();
             scripts.push(ConversationScript {
-                id: Arc::<str>::from(conversation_id),
-                turns: conversation_turns.into(),
-                assistant_turns: assistant_turns.into(),
+                id,
+                turns,
+                assistants,
             });
         }
 
@@ -94,42 +105,53 @@ impl ConversationScripts {
 pub struct ConversationScript {
     pub id: Arc<str>,
     turns: Arc<[ConversationTurn]>,
-    assistant_turns: Arc<[Arc<str>]>,
+    assistants: Arc<[AssistantMessage]>,
 }
 
 impl ConversationScript {
-    pub fn assistant_at(&self, index: usize) -> Arc<str> {
-        let idx = index % self.assistant_turns.len();
-        self.assistant_turns[idx].clone()
+    pub fn assistant_at(&self, index: usize) -> AssistantMessage {
+        let idx = index % self.assistants.len();
+        self.assistants[idx].clone()
     }
 
-    pub fn response_for_user(&self, user_text: &str) -> Option<Arc<str>> {
-        let needle = Self::normalize(user_text);
+    pub fn response_for_user(&self, user_text: &str) -> Option<AssistantMessage> {
+        let needle = ConversationTurn::normalize(user_text);
         for (idx, turn) in self.turns.iter().enumerate() {
             if !matches!(turn.role, ConversationRole::User) {
                 continue;
             }
-            if Self::normalize(turn.content.as_ref()) == needle {
-                return self
-                    .turns
-                    .iter()
-                    .skip(idx + 1)
-                    .find(|next| matches!(next.role, ConversationRole::Assistant))
-                    .map(|next| next.content.clone());
+            if ConversationTurn::normalize(turn.content.as_ref()) == needle {
+                return self.turns.iter().skip(idx + 1).find_map(|next| {
+                    next.assistant_index()
+                        .map(|slot| self.assistants[slot].clone())
+                });
             }
         }
         None
     }
+}
 
-    fn normalize(text: &str) -> String {
-        text.trim().to_ascii_lowercase()
-    }
+#[derive(Clone)]
+pub struct AssistantMessage {
+    pub text: Arc<str>,
+    pub tokens: Arc<[usize]>,
 }
 
 #[derive(Clone)]
 pub struct ConversationTurn {
     pub role: ConversationRole,
     pub content: Arc<str>,
+    assistant_index: Option<usize>,
+}
+
+impl ConversationTurn {
+    fn assistant_index(&self) -> Option<usize> {
+        self.assistant_index
+    }
+
+    fn normalize(text: &str) -> String {
+        text.trim().to_ascii_lowercase()
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -188,10 +210,10 @@ pub fn ensure_sample_dataset(path: &Path) -> Result<PathBuf, DatasetError> {
         return Ok(path.to_path_buf());
     }
 
-    if let Some(parent) = path.parent() {
-        if !parent.exists() {
-            fs::create_dir_all(parent)?;
-        }
+    if let Some(parent) = path.parent()
+        && !parent.exists()
+    {
+        fs::create_dir_all(parent)?;
     }
 
     let schema = Arc::new(Schema::new(vec![
@@ -331,13 +353,15 @@ fn sample_rows() -> Vec<SampleRow> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+    use tiktoken_rs::cl100k_base;
 
     #[test]
     fn loads_sample_dataset() -> Result<(), DatasetError> {
         let dir = tempdir().unwrap();
         let path = dir.path().join("sample.parquet");
         ensure_sample_dataset(&path)?;
-        let scripts = ConversationScripts::load(&path)?;
+        let tokenizer = Arc::new(cl100k_base().unwrap());
+        let scripts = ConversationScripts::load(&path, &tokenizer)?;
         assert!(!scripts.share().is_empty());
         Ok(())
     }

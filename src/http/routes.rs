@@ -16,7 +16,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::model::{
     ChatCompletionList, ChatCompletionMessageList, ChatCompletionRequest, ChatCompletionResponse,
 };
-use crate::service::{ChatService, chunk_from_delta, delta_for_token, empty_delta};
+use crate::service::{ChatService, chunk_from_delta, delta_for_text, empty_delta};
 use crate::store::SortOrder;
 
 #[derive(Clone)]
@@ -110,32 +110,48 @@ async fn create_chat_completion(
 
     let (sender, receiver) = mpsc::channel::<Result<Event, Infallible>>(32);
     let response = prepared.response.clone();
-    let tokens = prepared.tokens.clone();
+    let tokens = prepared.tokens;
     let rate = state.service.tokens_per_second();
+    let tokenizer = state.service.tokenizer();
     tokio::spawn(async move {
-        let delay = if rate.get() == 0 {
-            Duration::from_millis(0)
-        } else {
-            Duration::from_secs_f64(1.0 / rate.get() as f64)
-        };
+        let delay = Duration::from_secs_f64(1.0 / rate.get() as f64);
+        let mut rendered = String::new();
+        let mut buffer = Vec::new();
+
         for (index, token) in tokens.into_iter().enumerate() {
-            let delta = delta_for_token(token, index == 0);
-            let chunk = chunk_from_delta(&response, delta, None);
-            match Event::default().json_data(&chunk) {
-                Ok(event) => {
-                    if sender.send(Ok(event)).await.is_err() {
+            buffer.push(token);
+            let decoded = match tokenizer.decode(buffer.clone()) {
+                Ok(text) => text,
+                Err(error) => {
+                    tracing::error!(target: "no_llm_api", ?error, "failed to decode token stream");
+                    return;
+                }
+            };
+            let delta = &decoded[rendered.len()..];
+            if !delta.is_empty() {
+                let chunk = chunk_from_delta(
+                    &response,
+                    delta_for_text(delta.to_string(), index == 0),
+                    None,
+                );
+                match Event::default().json_data(&chunk) {
+                    Ok(event) => {
+                        if sender.send(Ok(event)).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(error) => {
+                        tracing::error!(target: "no_llm_api", ?error, "failed to serialize chunk");
                         return;
                     }
                 }
-                Err(error) => {
-                    tracing::error!(target: "no_llm_api", ?error, "failed to serialize chunk");
-                    return;
-                }
             }
+            rendered = decoded;
             if !delay.is_zero() {
                 tokio::time::sleep(delay).await;
             }
         }
+
         let final_chunk = chunk_from_delta(&response, empty_delta(), Some("stop"));
         if let Ok(event) = Event::default().json_data(&final_chunk) {
             let _ = sender.send(Ok(event)).await;

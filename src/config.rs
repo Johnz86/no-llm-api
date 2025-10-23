@@ -11,6 +11,13 @@ pub struct Settings {
     pub bind_address: SocketAddr,
     pub tokens_per_second: NonZeroU32,
     pub dataset_path: PathBuf,
+    pub tokenizer: TokenizerSettings,
+}
+
+/// Collects tokenizer-related configuration knobs.
+#[derive(Debug, Clone)]
+pub struct TokenizerSettings {
+    pub preset: String,
 }
 
 #[derive(Debug, Error)]
@@ -28,6 +35,8 @@ impl Settings {
         let tokens_per_second = env::var("TOKENS_PER_SECOND").unwrap_or_else(|_| "30".to_string());
         let dataset_path =
             env::var("DATASET_PATH").unwrap_or_else(|_| "data/conversations.parquet".to_string());
+        let tokenizer_preset =
+            env::var("TOKENIZER_MODEL").unwrap_or_else(|_| "cl100k_base".to_string());
 
         let bind_address = bind_address
             .parse()
@@ -42,6 +51,9 @@ impl Settings {
             bind_address,
             tokens_per_second,
             dataset_path: PathBuf::from(dataset_path),
+            tokenizer: TokenizerSettings {
+                preset: tokenizer_preset,
+            },
         })
     }
 }

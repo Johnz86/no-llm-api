@@ -41,10 +41,10 @@ impl CompletionStore {
             SortOrder::Descending => guard.values().rev().cloned().collect(),
         };
 
-        if let Some(after_id) = after {
-            if let Some(idx) = items.iter().position(|item| item.completion.id == after_id) {
-                items.drain(0..=idx);
-            }
+        if let Some(after_id) = after
+            && let Some(idx) = items.iter().position(|item| item.completion.id == after_id)
+        {
+            items.drain(0..=idx);
         }
 
         if limit == 0 || items.len() <= limit {
@@ -94,10 +94,10 @@ impl CompletionStore {
             SortOrder::Descending => entry.messages.iter().cloned().rev().collect(),
         };
 
-        if let Some(after_id) = after {
-            if let Some(idx) = messages.iter().position(|message| message.id == after_id) {
-                messages.drain(0..=idx);
-            }
+        if let Some(after_id) = after
+            && let Some(idx) = messages.iter().position(|message| message.id == after_id)
+        {
+            messages.drain(0..=idx);
         }
 
         if limit == 0 || messages.len() <= limit {
@@ -138,14 +138,12 @@ impl StoredCompletion {
         self.completion.clone()
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{
-        ChatCompletionChoice, ChatCompletionResponseMessage, ChatCompletionUsage, ChatRole,
-        MessageContent,
-    };
-    use serde_json::{Map, json};
+    use crate::model::{ChatRole, MessageContent};
+    use serde_json::json;
 
     fn sample_response(id: &str, created: i64) -> ChatCompletionResponse {
         ChatCompletionResponse {
@@ -153,14 +151,14 @@ mod tests {
             object: "chat.completion".to_string(),
             created,
             model: "test-model".to_string(),
-            usage: ChatCompletionUsage {
+            usage: crate::model::ChatCompletionUsage {
                 prompt_tokens: 2,
                 completion_tokens: 3,
                 total_tokens: 5,
             },
-            choices: vec![ChatCompletionChoice {
+            choices: vec![crate::model::ChatCompletionChoice {
                 index: 0,
-                message: ChatCompletionResponseMessage {
+                message: crate::model::ChatCompletionResponseMessage {
                     role: ChatRole::Assistant,
                     content: Some(MessageContent::Text("ok".to_string())),
                     refusal: None,
