@@ -188,7 +188,7 @@ impl StoredCompletion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ChatRole, MessageContent};
+    use crate::model::{ChatRole, FinishReason, MessageContent};
     use serde_json::json;
 
     fn sample_response(id: &str, created: i64) -> ChatCompletionResponse {
@@ -201,6 +201,8 @@ mod tests {
                 prompt_tokens: 2,
                 completion_tokens: 3,
                 total_tokens: 5,
+                prompt_tokens_details: None,
+                completion_tokens_details: None,
             },
             choices: vec![crate::model::ChatCompletionChoice {
                 index: 0,
@@ -212,7 +214,7 @@ mod tests {
                     function_call: None,
                     audio: None,
                 },
-                finish_reason: "stop".to_string(),
+                finish_reason: Some(FinishReason::Stop),
                 logprobs: None,
             }],
             metadata: None,

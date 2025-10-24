@@ -14,6 +14,12 @@ pub enum ChatRole {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatCompletionToolType {
+    Function,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MessageContent {
     Text(String),
@@ -58,6 +64,8 @@ pub struct ChatCompletionRequestMessage {
     pub function_call: Option<Value>,
     #[serde(default)]
     pub audio: Option<Value>,
+    #[serde(default)]
+    pub refusal: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -125,6 +133,30 @@ pub struct ChatCompletionUsage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
     pub total_tokens: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_tokens_details: Option<PromptTokensDetails>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_tokens_details: Option<CompletionTokensDetails>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PromptTokensDetails {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_tokens: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CompletionTokensDetails {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted_prediction_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rejected_prediction_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,20 +166,77 @@ pub struct ChatCompletionResponseMessage {
     #[serde(default)]
     pub refusal: Option<String>,
     #[serde(default)]
-    pub tool_calls: Option<Vec<Value>>,
+    pub tool_calls: Option<Vec<ChatCompletionMessageToolCall>>,
     #[serde(default)]
-    pub function_call: Option<Value>,
+    pub function_call: Option<FunctionCall>,
     #[serde(default)]
-    pub audio: Option<Value>,
+    pub audio: Option<ChatCompletionResponseMessageAudio>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatCompletionResponseMessageAudio {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub expires_at: Option<u32>,
+    #[serde(default)]
+    pub data: Option<String>,
+    #[serde(default)]
+    pub transcript: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionCall {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub arguments: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatCompletionChoice {
     pub index: usize,
     pub message: ChatCompletionResponseMessage,
-    pub finish_reason: String,
     #[serde(default)]
-    pub logprobs: Option<Value>,
+    pub finish_reason: Option<FinishReason>,
+    #[serde(default)]
+    pub logprobs: Option<ChatChoiceLogprobs>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FinishReason {
+    Stop,
+    Length,
+    ToolCalls,
+    ContentFilter,
+    FunctionCall,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatChoiceLogprobs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<Vec<ChatCompletionTokenLogprob>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<Vec<ChatCompletionTokenLogprob>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatCompletionTokenLogprob {
+    pub token: String,
+    pub logprob: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_logprobs: Vec<TopLogprob>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopLogprob {
+    pub token: String,
+    pub logprob: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -247,9 +336,9 @@ pub struct ChatCompletionChunk {
 pub struct ChatCompletionChunkChoice {
     pub index: usize,
     pub delta: ChatCompletionChunkDelta,
-    pub finish_reason: Option<String>,
+    pub finish_reason: Option<FinishReason>,
     #[serde(default)]
-    pub logprobs: Option<Value>,
+    pub logprobs: Option<ChatChoiceLogprobs>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -259,9 +348,19 @@ pub struct ChatCompletionChunkDelta {
     #[serde(default)]
     pub content: Option<String>,
     #[serde(default)]
-    pub function_call: Option<Value>,
+    pub function_call: Option<FunctionCall>,
     #[serde(default)]
-    pub tool_calls: Option<Vec<Value>>,
+    pub tool_calls: Option<Vec<ChatCompletionMessageToolCall>>,
     #[serde(default)]
     pub refusal: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatCompletionMessageToolCall {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub r#type: Option<ChatCompletionToolType>,
+    #[serde(default)]
+    pub function: Option<FunctionCall>,
 }

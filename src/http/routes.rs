@@ -157,7 +157,7 @@ async fn create_chat_completion(
         let finish = response
             .choices
             .first()
-            .map(|choice| choice.finish_reason.as_str());
+            .and_then(|choice| choice.finish_reason.clone());
         let final_chunk = chunk_from_delta(&response, empty_delta(), finish);
         if let Ok(event) = Event::default().json_data(&final_chunk) {
             let _ = sender.send(Ok(event)).await;

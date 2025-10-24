@@ -11,7 +11,8 @@ use crate::dataset::{AssistantMessage, ConversationScript, ConversationScripts};
 use crate::model::{
     ChatCompletionChoice, ChatCompletionChunk, ChatCompletionChunkChoice, ChatCompletionChunkDelta,
     ChatCompletionRequest, ChatCompletionRequestMessage, ChatCompletionResponse,
-    ChatCompletionResponseMessage, ChatCompletionUsage, ChatRole, MessageContent, StoredMessage,
+    ChatCompletionResponseMessage, ChatCompletionUsage, ChatRole, FinishReason, MessageContent,
+    StoredMessage,
 };
 use crate::store::{CompletionStore, ListFilters, SortOrder, StoredCompletion};
 
@@ -77,7 +78,7 @@ impl ChatService {
 
         let mut tokens: Vec<u32> = assistant.tokens.iter().copied().collect();
         let mut assistant_text = assistant.text.as_ref().to_string();
-        let mut finish_reason = "stop".to_string();
+        let mut finish_reason = FinishReason::Stop;
 
         if let Some(cap) = request
             .max_completion_tokens
@@ -98,7 +99,7 @@ impl ChatService {
                     assistant_text = assistant.text.as_ref().to_string();
                 }
             }
-            finish_reason = "length".to_string();
+            finish_reason = FinishReason::Length;
         }
 
         let completion_token_count = tokens.len() as u32;
@@ -108,6 +109,8 @@ impl ChatService {
             prompt_tokens,
             completion_tokens: completion_token_count,
             total_tokens: prompt_tokens + completion_token_count,
+            prompt_tokens_details: None,
+            completion_tokens_details: None,
         };
 
         let created = unix_timestamp();
@@ -126,7 +129,7 @@ impl ChatService {
         let choice = ChatCompletionChoice {
             index: 0,
             message: completion_message,
-            finish_reason: finish_reason.clone(),
+            finish_reason: Some(finish_reason.clone()),
             logprobs: None,
         };
 
@@ -284,12 +287,12 @@ fn last_user_message(messages: &[ChatCompletionRequestMessage]) -> Option<String
 pub fn chunk_from_delta(
     response: &ChatCompletionResponse,
     delta: ChatCompletionChunkDelta,
-    finish: Option<&str>,
+    finish: Option<FinishReason>,
 ) -> ChatCompletionChunk {
     let choice = ChatCompletionChunkChoice {
         index: 0,
         delta,
-        finish_reason: finish.map(|reason| reason.to_string()),
+        finish_reason: finish.clone(),
         logprobs: None,
     };
 
@@ -341,7 +344,7 @@ mod tests {
     use super::*;
     use crate::dataset::{ConversationScripts, ensure_sample_dataset};
     use crate::model::{
-        ChatCompletionRequest, ChatCompletionRequestMessage, ChatRole, MessageContent,
+        ChatCompletionRequest, ChatCompletionRequestMessage, ChatRole, FinishReason, MessageContent,
     };
     use tempfile::tempdir;
     use tiktoken_rs::cl100k_base;
@@ -356,6 +359,7 @@ mod tests {
                 tool_calls: None,
                 function_call: None,
                 audio: None,
+                refusal: None,
             }],
             ..Default::default()
         }
@@ -432,8 +436,8 @@ mod tests {
                 .response
                 .choices
                 .first()
-                .map(|choice| choice.finish_reason.as_str()),
-            Some("length")
+                .and_then(|choice| choice.finish_reason.clone()),
+            Some(FinishReason::Length)
         );
     }
 }
