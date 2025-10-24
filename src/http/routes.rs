@@ -9,6 +9,7 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -16,8 +17,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::model::{
     ChatCompletionList, ChatCompletionMessageList, ChatCompletionRequest, ChatCompletionResponse,
 };
-use crate::service::{ChatService, chunk_from_delta, delta_for_text, empty_delta};
-use crate::store::SortOrder;
+use crate::service::{ChatService, chunk_from_delta, delta_for_text, empty_delta, usage_chunk};
+use crate::store::{ListFilters, SortOrder};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -69,7 +70,7 @@ async fn list_chat_completions(
 
     let mut results = state
         .service
-        .list(order, query.after.as_deref(), fetch)
+        .list(order, query.after.as_deref(), fetch, query.to_filters())
         .await;
     let has_more = results.len() > limit;
     if has_more {
@@ -111,6 +112,7 @@ async fn create_chat_completion(
     let (sender, receiver) = mpsc::channel::<Result<Event, Infallible>>(32);
     let response = prepared.response.clone();
     let tokens = prepared.tokens;
+    let include_usage = prepared.include_usage_chunk;
     let rate = state.service.tokens_per_second();
     let tokenizer = state.service.tokenizer();
     tokio::spawn(async move {
@@ -152,9 +154,19 @@ async fn create_chat_completion(
             }
         }
 
-        let final_chunk = chunk_from_delta(&response, empty_delta(), Some("stop"));
+        let finish = response
+            .choices
+            .first()
+            .map(|choice| choice.finish_reason.as_str());
+        let final_chunk = chunk_from_delta(&response, empty_delta(), finish);
         if let Ok(event) = Event::default().json_data(&final_chunk) {
             let _ = sender.send(Ok(event)).await;
+        }
+        if include_usage {
+            let usage = usage_chunk(&response);
+            if let Ok(event) = Event::default().json_data(&usage) {
+                let _ = sender.send(Ok(event)).await;
+            }
         }
         let _ = sender.send(Ok(Event::default().data("[DONE]"))).await;
     });
@@ -213,6 +225,10 @@ struct ListQuery {
     after: Option<String>,
     limit: Option<usize>,
     order: Option<String>,
+    model: Option<String>,
+    #[serde(default)]
+    #[serde(flatten)]
+    metadata: MetadataFilters,
 }
 
 #[derive(Default, Deserialize)]
@@ -220,6 +236,68 @@ struct MessageQuery {
     after: Option<String>,
     limit: Option<usize>,
     order: Option<String>,
+}
+
+#[derive(Default)]
+struct MetadataFilters {
+    pairs: Vec<(String, String)>,
+}
+
+impl MetadataFilters {
+    fn entries(&self) -> &[(String, String)] {
+        &self.pairs
+    }
+}
+
+impl ListQuery {
+    fn to_filters(&self) -> ListFilters {
+        ListFilters {
+            model: self.model.clone(),
+            metadata: self.metadata.entries().to_vec(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for MetadataFilters {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct MetadataVisitor;
+
+        impl<'de> Visitor<'de> for MetadataVisitor {
+            type Value = MetadataFilters;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("metadata query parameters")
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(MetadataFilters::default())
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut pairs = Vec::new();
+                while let Some((key, value)) = map.next_entry::<String, String>()? {
+                    if let Some(inner) = key
+                        .strip_prefix("metadata[")
+                        .and_then(|rest| rest.strip_suffix(']'))
+                    {
+                        pairs.push((inner.to_string(), value));
+                    }
+                }
+                Ok(MetadataFilters { pairs })
+            }
+        }
+
+        deserializer.deserialize_any(MetadataVisitor)
+    }
 }
 
 async fn get_chat_completion_messages(

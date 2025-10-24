@@ -3,7 +3,7 @@
 ## Overview
 - Mock implementation of key OpenAI Chat Completions endpoints.
 - Serves deterministic assistant messages loaded from a parquet dataset.
-- Streams responses via SSE with a configurable tokens-per-second rate.
+- Streams responses via SSE with a configurable tokens-per-second rate using OpenAI-compatible tokenization.
 
 ## Getting Started
 - `cargo build` to compile the service.
@@ -13,6 +13,7 @@
 - `BIND_ADDRESS`: address passed to `TcpListener::bind` (default `127.0.0.1:8080`).
 - `TOKENS_PER_SECOND`: streaming speed budget (default `30`).
 - `DATASET_PATH`: parquet file path for scripted conversations (default `data/conversations.parquet`). Missing files are generated from bundled fixtures on startup.
+- `TOKENIZER_MODEL`: tokenizer preset loaded via `tiktoken-rs` (`cl100k_base`, `o200k_base`, `p50k_base`, `p50k_edit`, or `r50k_base`; default `cl100k_base`).
 
 ## API Surface
 - `GET /v1/chat/completions`
@@ -28,5 +29,6 @@ The same routes are also exposed without the `/v1` prefix for direct compatibili
 - `cargo test` executes dataset and service integration checks.
 
 ## Notes
+- Assistant replies are tokenized at startup so token throughput settings map 1:1 with service output speed.
 - Streaming completions emit SSE chunks at the configured rate and automatically end with `[DONE]`.
 - Only completions created with `"store": true` are persisted for retrieval, update, deletion, and message history queries.

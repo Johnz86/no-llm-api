@@ -6,9 +6,11 @@ use std::borrow::Cow;
 #[serde(rename_all = "snake_case")]
 pub enum ChatRole {
     System,
+    Developer,
     User,
     Assistant,
     Tool,
+    Function,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,9 +56,17 @@ pub struct ChatCompletionRequestMessage {
     pub tool_calls: Option<Vec<Value>>,
     #[serde(default)]
     pub function_call: Option<Value>,
+    #[serde(default)]
+    pub audio: Option<Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ChatCompletionStreamOptions {
+    pub include_usage: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChatCompletionRequest {
     pub model: String,
     pub messages: Vec<ChatCompletionRequestMessage>,
@@ -73,7 +83,19 @@ pub struct ChatCompletionRequest {
     #[serde(default)]
     pub presence_penalty: Option<f32>,
     #[serde(default)]
+    pub stop: Option<Value>,
+    #[serde(default)]
+    pub max_completion_tokens: Option<u32>,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub service_tier: Option<String>,
+    #[serde(default)]
     pub response_format: Option<Value>,
+    #[serde(default)]
+    pub response_prefix: Option<String>,
+    #[serde(default)]
+    pub logit_bias: Option<Map<String, Value>>,
     #[serde(default)]
     pub metadata: Option<Map<String, Value>>,
     #[serde(default)]
@@ -83,7 +105,15 @@ pub struct ChatCompletionRequest {
     #[serde(default)]
     pub tool_choice: Option<Value>,
     #[serde(default)]
+    pub parallel_tool_calls: Option<bool>,
+    #[serde(default)]
     pub modalities: Option<Vec<String>>,
+    #[serde(default)]
+    pub stream_options: Option<ChatCompletionStreamOptions>,
+    #[serde(default)]
+    pub function_call: Option<Value>,
+    #[serde(default)]
+    pub audio: Option<Value>,
     #[serde(default)]
     pub user: Option<String>,
     #[serde(default)]
@@ -135,9 +165,35 @@ pub struct ChatCompletionResponse {
     #[serde(default)]
     pub service_tier: Option<String>,
     #[serde(default)]
+    pub request_id: Option<String>,
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    #[serde(default)]
+    pub top_p: Option<f32>,
+    #[serde(default)]
+    pub frequency_penalty: Option<f32>,
+    #[serde(default)]
+    pub presence_penalty: Option<f32>,
+    #[serde(default)]
+    pub stop: Option<Value>,
+    #[serde(default)]
+    pub seed: Option<u64>,
+    #[serde(default)]
     pub tool_choice: Option<Value>,
     #[serde(default)]
     pub response_format: Option<Value>,
+    #[serde(default)]
+    pub parallel_tool_calls: Option<bool>,
+    #[serde(default)]
+    pub modalities: Option<Vec<String>>,
+    #[serde(default)]
+    pub response_prefix: Option<String>,
+    #[serde(default)]
+    pub logit_bias: Option<Map<String, Value>>,
+    #[serde(default)]
+    pub stream_options: Option<ChatCompletionStreamOptions>,
+    #[serde(default)]
+    pub audio: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,6 +237,10 @@ pub struct ChatCompletionChunk {
     pub created: i64,
     pub model: String,
     pub choices: Vec<ChatCompletionChunkChoice>,
+    #[serde(default)]
+    pub system_fingerprint: Option<String>,
+    #[serde(default)]
+    pub usage: Option<ChatCompletionUsage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -202,4 +262,6 @@ pub struct ChatCompletionChunkDelta {
     pub function_call: Option<Value>,
     #[serde(default)]
     pub tool_calls: Option<Vec<Value>>,
+    #[serde(default)]
+    pub refusal: Option<String>,
 }

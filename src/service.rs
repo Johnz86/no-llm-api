@@ -13,7 +13,7 @@ use crate::model::{
     ChatCompletionRequest, ChatCompletionRequestMessage, ChatCompletionResponse,
     ChatCompletionResponseMessage, ChatCompletionUsage, ChatRole, MessageContent, StoredMessage,
 };
-use crate::store::{CompletionStore, SortOrder, StoredCompletion};
+use crate::store::{CompletionStore, ListFilters, SortOrder, StoredCompletion};
 
 pub struct ChatService {
     scripts: Arc<[ConversationScript]>,
@@ -27,6 +27,7 @@ pub struct ChatService {
 pub struct PreparedCompletion {
     pub response: ChatCompletionResponse,
     pub tokens: Vec<usize>,
+    pub include_usage_chunk: bool,
 }
 
 impl ChatService {
@@ -57,6 +58,11 @@ impl ChatService {
 
     pub async fn create_completion(&self, request: ChatCompletionRequest) -> PreparedCompletion {
         let store_enabled = request.store.unwrap_or(false);
+        let include_usage_chunk = request
+            .stream_options
+            .as_ref()
+            .map(|options| options.include_usage)
+            .unwrap_or(false);
 
         let assistant = match self.match_assistant_response(&request) {
             Some(message) => message,
@@ -69,7 +75,32 @@ impl ChatService {
             }
         };
 
-        let tokens: Vec<usize> = assistant.tokens.iter().copied().collect();
+        let mut tokens: Vec<usize> = assistant.tokens.iter().copied().collect();
+        let mut assistant_text = assistant.text.as_ref().to_string();
+        let mut finish_reason = "stop".to_string();
+
+        if let Some(cap) = request
+            .max_completion_tokens
+            .or(request.max_tokens)
+            .map(|value| value as usize)
+            .filter(|cap| *cap < tokens.len())
+        {
+            tokens.truncate(cap);
+            match self.tokenizer.decode(tokens.clone()) {
+                Ok(decoded) => assistant_text = decoded,
+                Err(error) => {
+                    tracing::error!(
+                        target: "no_llm_api",
+                        ?error,
+                        "failed to decode truncated completion; using full response"
+                    );
+                    tokens = assistant.tokens.iter().copied().collect();
+                    assistant_text = assistant.text.as_ref().to_string();
+                }
+            }
+            finish_reason = "length".to_string();
+        }
+
         let completion_token_count = tokens.len() as u32;
         let prompt_tokens = count_prompt_tokens(&request.messages, &self.tokenizer);
 
@@ -79,9 +110,9 @@ impl ChatService {
             total_tokens: prompt_tokens + completion_token_count,
         };
 
-        let assistant_text = assistant.text.as_ref().to_string();
         let created = unix_timestamp();
         let identifier = format!("chatcmpl-{}", Uuid::new_v4());
+        let request_id = format!("req_{}", Uuid::new_v4().as_simple());
 
         let completion_message = ChatCompletionResponseMessage {
             role: ChatRole::Assistant,
@@ -95,9 +126,18 @@ impl ChatService {
         let choice = ChatCompletionChoice {
             index: 0,
             message: completion_message,
-            finish_reason: "stop".to_string(),
+            finish_reason: finish_reason.clone(),
             logprobs: None,
         };
+
+        let temperature = request.temperature.or(Some(1.0));
+        let top_p = request.top_p.or(Some(1.0));
+        let frequency_penalty = request.frequency_penalty.or(Some(0.0));
+        let presence_penalty = request.presence_penalty.or(Some(0.0));
+        let service_tier = request
+            .service_tier
+            .clone()
+            .or_else(|| Some("default".to_string()));
 
         let response = ChatCompletionResponse {
             id: identifier.clone(),
@@ -108,9 +148,22 @@ impl ChatService {
             choices: vec![choice],
             metadata: request.metadata.clone(),
             system_fingerprint: Some("fp_mock".to_string()),
-            service_tier: Some("default".to_string()),
+            service_tier,
+            request_id: Some(request_id),
+            temperature,
+            top_p,
+            frequency_penalty,
+            presence_penalty,
+            stop: request.stop.clone(),
+            seed: request.seed,
             tool_choice: request.tool_choice.clone(),
             response_format: request.response_format.clone(),
+            parallel_tool_calls: request.parallel_tool_calls,
+            modalities: request.modalities.clone(),
+            response_prefix: request.response_prefix.clone(),
+            logit_bias: request.logit_bias.clone(),
+            stream_options: request.stream_options.clone(),
+            audio: request.audio.clone(),
         };
 
         if store_enabled {
@@ -119,7 +172,11 @@ impl ChatService {
             self.store.save(response.clone(), stored_messages).await;
         }
 
-        PreparedCompletion { response, tokens }
+        PreparedCompletion {
+            response,
+            tokens,
+            include_usage_chunk,
+        }
     }
 
     pub async fn list(
@@ -127,8 +184,9 @@ impl ChatService {
         order: SortOrder,
         after: Option<&str>,
         limit: usize,
+        filters: ListFilters,
     ) -> Vec<StoredCompletion> {
-        self.store.list(order, after, limit).await
+        self.store.list(order, after, limit, &filters).await
     }
 
     pub async fn get(&self, id: &str) -> Option<StoredCompletion> {
@@ -241,6 +299,8 @@ pub fn chunk_from_delta(
         created: response.created,
         model: response.model.clone(),
         choices: vec![choice],
+        system_fingerprint: response.system_fingerprint.clone(),
+        usage: None,
     }
 }
 
@@ -250,6 +310,7 @@ pub fn delta_for_text(content: String, include_role: bool) -> ChatCompletionChun
         content: Some(content),
         function_call: None,
         tool_calls: None,
+        refusal: None,
     }
 }
 
@@ -259,6 +320,19 @@ pub fn empty_delta() -> ChatCompletionChunkDelta {
         content: None,
         function_call: None,
         tool_calls: None,
+        refusal: None,
+    }
+}
+
+pub fn usage_chunk(response: &ChatCompletionResponse) -> ChatCompletionChunk {
+    ChatCompletionChunk {
+        id: response.id.clone(),
+        object: "chat.completion.chunk".to_string(),
+        created: response.created,
+        model: response.model.clone(),
+        choices: Vec::new(),
+        system_fingerprint: response.system_fingerprint.clone(),
+        usage: Some(response.usage.clone()),
     }
 }
 
@@ -281,21 +355,9 @@ mod tests {
                 name: None,
                 tool_calls: None,
                 function_call: None,
+                audio: None,
             }],
-            stream: false,
-            max_tokens: None,
-            temperature: None,
-            top_p: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-            response_format: None,
-            metadata: None,
-            seed: None,
-            tools: None,
-            tool_choice: None,
-            modalities: None,
-            user: None,
-            store: None,
+            ..Default::default()
         }
     }
 
@@ -311,13 +373,17 @@ mod tests {
         let request = request_with_text("hello");
         let result = service.create_completion(request.clone()).await;
         assert!(!result.tokens.is_empty());
-        let stored = service.list(SortOrder::Ascending, None, 10).await;
+        let stored = service
+            .list(SortOrder::Ascending, None, 10, ListFilters::default())
+            .await;
         assert!(stored.is_empty());
 
         let mut second = request.clone();
         second.store = Some(true);
         let stored_result = service.create_completion(second).await;
-        let stored = service.list(SortOrder::Ascending, None, 10).await;
+        let stored = service
+            .list(SortOrder::Ascending, None, 10, ListFilters::default())
+            .await;
         assert_eq!(stored.len(), 1);
         let retrieved = service.get(&stored_result.response.id).await.unwrap();
         assert_eq!(retrieved.completion.id, stored_result.response.id);
@@ -341,6 +407,33 @@ mod tests {
         assert_eq!(
             response_text,
             "Sprint closed 14 tickets, shipped analytics, and stabilized the API."
+        );
+    }
+
+    #[tokio::test]
+    async fn applies_max_completion_token_cap() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("sample.parquet");
+        ensure_sample_dataset(&path).unwrap();
+        let tokenizer = Arc::new(cl100k_base().unwrap());
+        let scripts = ConversationScripts::load(&path, &tokenizer).unwrap();
+        let service = ChatService::new(scripts, tokenizer, NonZeroU32::new(30).unwrap());
+
+        let mut request = request_with_text("Summarize the sprint update.");
+        request.max_completion_tokens = Some(5);
+        let result = service.create_completion(request).await;
+        assert!(result.response.usage.completion_tokens <= 5);
+        assert_eq!(
+            result.tokens.len() as u32,
+            result.response.usage.completion_tokens
+        );
+        assert_eq!(
+            result
+                .response
+                .choices
+                .first()
+                .map(|choice| choice.finish_reason.as_str()),
+            Some("length")
         );
     }
 }

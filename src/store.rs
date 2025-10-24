@@ -7,6 +7,12 @@ use tokio::sync::RwLock;
 
 use crate::model::{ChatCompletionDeleted, ChatCompletionResponse, StoredMessage};
 
+#[derive(Debug, Clone, Default)]
+pub struct ListFilters {
+    pub model: Option<String>,
+    pub metadata: Vec<(String, String)>,
+}
+
 #[derive(Clone, Default)]
 pub struct CompletionStore {
     inner: Arc<RwLock<IndexMap<String, StoredCompletion>>>,
@@ -34,12 +40,23 @@ impl CompletionStore {
         order: SortOrder,
         after: Option<&str>,
         limit: usize,
+        filters: &ListFilters,
     ) -> Vec<StoredCompletion> {
         let guard = self.inner.read().await;
         let mut items: Vec<StoredCompletion> = match order {
             SortOrder::Ascending => guard.values().cloned().collect(),
             SortOrder::Descending => guard.values().rev().cloned().collect(),
         };
+
+        if let Some(model) = filters.model.as_ref() {
+            items.retain(|item| item.completion.model == *model);
+        }
+
+        if !filters.metadata.is_empty() {
+            items.retain(|item| {
+                metadata_matches(item.completion.metadata.as_ref(), &filters.metadata)
+            });
+        }
 
         if let Some(after_id) = after
             && let Some(idx) = items.iter().position(|item| item.completion.id == after_id)
@@ -109,6 +126,35 @@ impl CompletionStore {
     }
 }
 
+fn metadata_matches(metadata: Option<&Map<String, Value>>, filters: &[(String, String)]) -> bool {
+    let Some(map) = metadata else {
+        return false;
+    };
+
+    filters.iter().all(|(key, expected)| match map.get(key) {
+        Some(value) => metadata_value_eq(value, expected),
+        None => false,
+    })
+}
+
+fn metadata_value_eq(value: &Value, expected: &str) -> bool {
+    match value {
+        Value::String(actual) => actual == expected,
+        Value::Number(number) => number.to_string() == expected,
+        Value::Bool(flag) => {
+            if expected.eq_ignore_ascii_case("true") {
+                *flag
+            } else if expected.eq_ignore_ascii_case("false") {
+                !flag
+            } else {
+                false
+            }
+        }
+        Value::Null => expected.eq_ignore_ascii_case("null"),
+        Value::Array(_) | Value::Object(_) => false,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortOrder {
     Ascending,
@@ -172,8 +218,21 @@ mod tests {
             metadata: None,
             system_fingerprint: Some("fp_test".to_string()),
             service_tier: Some("default".to_string()),
+            request_id: Some(format!("req_{id}")),
+            temperature: Some(1.0),
+            top_p: Some(1.0),
+            frequency_penalty: Some(0.0),
+            presence_penalty: Some(0.0),
+            stop: None,
+            seed: None,
             tool_choice: None,
             response_format: None,
+            parallel_tool_calls: None,
+            modalities: None,
+            response_prefix: None,
+            logit_bias: None,
+            stream_options: None,
+            audio: None,
         }
     }
 
@@ -200,15 +259,17 @@ mod tests {
         store
             .save(sample_response("a", 1), sample_messages("a"))
             .await;
-        store
-            .save(sample_response("b", 2), sample_messages("b"))
-            .await;
+        let mut with_meta = sample_response("b", 2);
+        let mut metadata = Map::new();
+        metadata.insert("tag".to_string(), json!("beta"));
+        with_meta.metadata = Some(metadata);
+        store.save(with_meta, sample_messages("b")).await;
         store
             .save(sample_response("c", 3), sample_messages("c"))
             .await;
 
         let asc = store
-            .list(SortOrder::Ascending, None, 2)
+            .list(SortOrder::Ascending, None, 2, &ListFilters::default())
             .await
             .into_iter()
             .map(|item| item.completion.id)
@@ -216,7 +277,7 @@ mod tests {
         assert_eq!(asc, vec!["a", "b"]);
 
         let desc = store
-            .list(SortOrder::Descending, None, 2)
+            .list(SortOrder::Descending, None, 2, &ListFilters::default())
             .await
             .into_iter()
             .map(|item| item.completion.id)
@@ -224,12 +285,24 @@ mod tests {
         assert_eq!(desc, vec!["c", "b"]);
 
         let after = store
-            .list(SortOrder::Ascending, Some("a"), 2)
+            .list(SortOrder::Ascending, Some("a"), 2, &ListFilters::default())
             .await
             .into_iter()
             .map(|item| item.completion.id)
             .collect::<Vec<_>>();
         assert_eq!(after, vec!["b", "c"]);
+
+        let mut filters = ListFilters::default();
+        filters
+            .metadata
+            .push(("tag".to_string(), "beta".to_string()));
+        let filtered = store
+            .list(SortOrder::Ascending, None, 10, &filters)
+            .await
+            .into_iter()
+            .map(|item| item.completion.id)
+            .collect::<Vec<_>>();
+        assert_eq!(filtered, vec!["b"]);
     }
 
     #[tokio::test]
