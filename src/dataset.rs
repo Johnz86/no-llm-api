@@ -134,7 +134,7 @@ impl ConversationScript {
 #[derive(Clone)]
 pub struct AssistantMessage {
     pub text: Arc<str>,
-    pub tokens: Arc<[usize]>,
+    pub tokens: Arc<[u32]>,
 }
 
 #[derive(Clone)]

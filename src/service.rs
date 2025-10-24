@@ -26,7 +26,7 @@ pub struct ChatService {
 
 pub struct PreparedCompletion {
     pub response: ChatCompletionResponse,
-    pub tokens: Vec<usize>,
+    pub tokens: Vec<u32>,
     pub include_usage_chunk: bool,
 }
 
@@ -75,7 +75,7 @@ impl ChatService {
             }
         };
 
-        let mut tokens: Vec<usize> = assistant.tokens.iter().copied().collect();
+        let mut tokens: Vec<u32> = assistant.tokens.iter().copied().collect();
         let mut assistant_text = assistant.text.as_ref().to_string();
         let mut finish_reason = "stop".to_string();
 

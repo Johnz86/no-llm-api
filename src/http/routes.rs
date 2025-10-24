@@ -33,13 +33,13 @@ pub fn build_router(service: Arc<ChatService>) -> Router {
             post(create_chat_completion).get(list_chat_completions),
         )
         .route(
-            "/chat/completions/:completion_id",
+            "/chat/completions/{completion_id}",
             get(get_chat_completion)
                 .post(update_chat_completion)
                 .delete(delete_chat_completion),
         )
         .route(
-            "/chat/completions/:completion_id/messages",
+            "/chat/completions/{completion_id}/messages",
             get(get_chat_completion_messages),
         )
         .with_state(state.clone());
@@ -118,7 +118,7 @@ async fn create_chat_completion(
     tokio::spawn(async move {
         let delay = Duration::from_secs_f64(1.0 / rate.get() as f64);
         let mut rendered = String::new();
-        let mut buffer = Vec::new();
+        let mut buffer: Vec<u32> = Vec::new();
 
         for (index, token) in tokens.into_iter().enumerate() {
             buffer.push(token);
