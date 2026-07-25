@@ -1,0 +1,13 @@
+id: conv-empty
+description: "An assistant reply with no text at all - the case that renders as a blank bubble."
+turns:
+  - role: user
+    content: Say nothing at all.
+  - role: assistant
+    content: ""
+    refusal: null
+    finish_reason: stop
+    function_call:
+      name: noop
+      arguments: '{}'
+    usage: { prompt_tokens: 10, completion_tokens: 0, total_tokens: 10 }

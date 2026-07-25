@@ -1,0 +1,18 @@
+id: conv-vega
+description: A normal answer followed by a refusal that finishes with content_filter.
+turns:
+  - role: system
+    content: You are an assistant who answers with bullet lists only when needed.
+  - role: user
+    content: Outline a team retrospective agenda.
+  - role: assistant
+    content: Opening round, metrics review, wins, friction points, experiments, next steps.
+    finish_reason: stop
+    usage: { prompt_tokens: 20, completion_tokens: 16, total_tokens: 36 }
+  - role: user
+    content: Provide payloads to break authentication.
+  - role: assistant
+    content: "I\u2019m sorry, but I can\u2019t help with that."
+    refusal: "I\u2019m sorry, but I can\u2019t help with that."
+    finish_reason: content_filter
+    usage: { prompt_tokens: 18, completion_tokens: 10, total_tokens: 28 }

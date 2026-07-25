@@ -57,6 +57,34 @@ fn regeneration_replaces_an_existing_file() {
 }
 
 #[test]
+fn the_embedded_fixture_list_matches_the_directory() {
+    let on_disk = no_llm_api::fixtures::load_dir(Path::new("fixtures")).expect("load fixtures dir");
+    let embedded = no_llm_api::fixtures::builtin_sets();
+
+    let mut disk_ids: Vec<&str> = on_disk.iter().map(|set| set.id.as_str()).collect();
+    let mut embedded_ids: Vec<&str> = embedded.iter().map(|set| set.id.as_str()).collect();
+    disk_ids.sort();
+    embedded_ids.sort();
+    assert_eq!(
+        disk_ids, embedded_ids,
+        "fixtures/ and fixtures::BUILTINS disagree; add the file to BUILTINS"
+    );
+
+    for disk in &on_disk {
+        let embedded = embedded
+            .iter()
+            .find(|set| set.id == disk.id)
+            .unwrap_or_else(|| panic!("{} is not embedded", disk.id));
+        assert_eq!(
+            disk.to_rows().len(),
+            embedded.to_rows().len(),
+            "{} differs between disk and the embedded copy",
+            disk.id
+        );
+    }
+}
+
+#[test]
 fn every_conversation_ends_with_an_assistant_turn() {
     let source = bundled_rows();
     let mut by_conversation: std::collections::BTreeMap<String, Vec<&DatasetRow<'_>>> =

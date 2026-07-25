@@ -151,6 +151,36 @@ thinking tag never leaks into `content`.
 
 ## Working with Datasets
 
+Fixtures are authored as YAML in `fixtures/`, one file per conversation, and compiled to parquet:
+
+```bash
+cargo run --bin fixtures -- lint                       # check every set
+cargo run --bin fixtures -- build --force               # rewrite data/conversations.parquet
+cargo run --bin fixtures -- build --input ./my-fixtures --output data/mine.parquet
+```
+
+A set looks like this; block scalars are what make markdown replies comfortable to write:
+
+```yaml
+id: conv-markdown
+description: "Markdown a GUI must render."
+turns:
+  - role: user
+    content: Show me a markdown-heavy answer.
+  - role: assistant
+    finish_reason: stop
+    content: |
+      ## Heading
+      1. item
+```
+
+The linter rejects a set that does not end with an assistant reply, an assistant turn with no
+payload or no `finish_reason`, a non-assistant turn that declares one, tool-call arguments that are
+not valid JSON, and any unknown field - a typo fails the build instead of being silently dropped.
+Twelve built-in sets cover markdown, truncation, refusal with `content_filter`, JSON output,
+reasoning traces, an empty reply, audio metadata, tool and function calls, multi-byte text and a
+~2k-token reply. They are embedded in the binary, so a fresh clone needs no files.
+
 ### Regenerate bundled sample
 
 ```bash

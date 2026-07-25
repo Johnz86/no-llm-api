@@ -1,0 +1,26 @@
+id: conv-markdown
+description: "Markdown a GUI must render: headings, list, table, fenced code, inline code."
+turns:
+  - role: user
+    content: Show me a markdown-heavy answer.
+  - role: assistant
+    finish_reason: stop
+    content: |
+      ## Deployment checklist
+
+      1. Run `cargo test`
+      2. Tag the release
+      3. Push the image
+
+      | Stage | Owner | Status |
+      | --- | --- | --- |
+      | build | CI | green |
+      | deploy | ops | pending |
+
+      ```rust
+      fn main() {
+          println!("hello");
+      }
+      ```
+
+      > Note: the mock never contacts a real model.

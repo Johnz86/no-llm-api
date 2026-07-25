@@ -1,0 +1,13 @@
+id: conv-long
+description: A reply of roughly two thousand tokens, for scroll and virtualisation testing.
+turns:
+  - role: user
+    content: Give me a very long answer.
+  - role: assistant
+    finish_reason: stop
+    repeat: 60
+    content: |
+      Streaming a long answer exercises a client's scroll anchoring, its incremental
+      markdown parser and its virtualised message list all at once, which is why one
+      deliberately large fixture is worth more than several small ones.
+    usage: { prompt_tokens: 12, completion_tokens: 2048, total_tokens: 2060 }

@@ -1,0 +1,9 @@
+id: conv-multibyte
+description: Combining marks, emoji, a ZWJ sequence and CJK, which break naive token decoding.
+turns:
+  - role: user
+    content: Reply with unicode please.
+  - role: assistant
+    finish_reason: stop
+    content: "café 🚀👍 👩‍💻 你好世界 — Grüße, Ελλάδα, العربية"
+    usage: { prompt_tokens: 12, completion_tokens: 26, total_tokens: 38 }

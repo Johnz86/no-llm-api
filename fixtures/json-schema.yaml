@@ -1,0 +1,10 @@
+id: conv-json-schema
+description: A strict JSON object reply, for clients that parse structured output.
+turns:
+  - role: user
+    content: Return the release status as JSON.
+  - role: assistant
+    finish_reason: stop
+    content: |-
+      {"release":"2026.7.1","status":"green","open_defects":0,"owners":["ops","qa"]}
+    usage: { prompt_tokens: 18, completion_tokens: 24, total_tokens: 42 }

@@ -1,5 +1,6 @@
 pub mod config;
 pub mod dataset;
+pub mod fixtures;
 pub mod http;
 pub mod live_safety;
 

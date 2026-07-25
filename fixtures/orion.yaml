@@ -1,0 +1,17 @@
+id: conv-orion
+description: Two-turn conversation with a system prompt; the plain-text baseline.
+turns:
+  - role: system
+    content: You are an efficient assistant who speaks in short sentences.
+  - role: user
+    content: Summarize the sprint update.
+  - role: assistant
+    content: Sprint closed 14 tickets, shipped analytics, and stabilized the API.
+    finish_reason: stop
+    usage: { prompt_tokens: 32, completion_tokens: 16, total_tokens: 48 }
+  - role: user
+    content: Highlight risks?
+  - role: assistant
+    content: Cloud migration is a week late; auth failover still in QA.
+    finish_reason: stop
+    usage: { prompt_tokens: 28, completion_tokens: 14, total_tokens: 42 }

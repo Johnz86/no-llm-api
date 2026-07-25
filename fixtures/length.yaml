@@ -1,0 +1,12 @@
+id: conv-length
+description: A reply cut off by the token budget, so a GUI's "truncated" affordance is testable.
+turns:
+  - role: user
+    content: Explain the whole architecture in detail.
+  - role: assistant
+    finish_reason: length
+    content: >
+      The service loads parquet fixtures at boot, indexes them by normalised user
+      turn, and answers each request by selecting a reply as a pure function of the
+      request digest. Streaming is paced by a token budget and the
+    usage: { prompt_tokens: 14, completion_tokens: 48, total_tokens: 62 }

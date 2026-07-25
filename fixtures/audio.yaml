@@ -1,0 +1,26 @@
+id: conv-audio
+description: Reply with audio metadata and structured content parts.
+turns:
+  - role: system
+    content: You narrate transcripts and attach audio metadata for reference.
+  - role: user
+    content: Summarize the voicemail from the pilot rollout.
+  - role: assistant
+    content: "Summary: Pilot rollout succeeded; monitor queue throughput and alert fatigue."
+    content_parts:
+      - type: output_text
+        text: "Summary: Pilot rollout succeeded; monitor queue throughput and alert fatigue."
+      - type: thought
+        text: Audio transcription attached.
+    audio:
+      id: aud_123
+      expires_at: 1735689600
+      data: "<mock>"
+      transcript: Pilot rollout succeeded. Keep an eye on queue throughput and responder fatigue.
+    finish_reason: stop
+    usage:
+      prompt_tokens: 30
+      completion_tokens: 22
+      total_tokens: 52
+      prompt_tokens_details: { audio_tokens: 4 }
+      completion_tokens_details: { audio_tokens: 6 }

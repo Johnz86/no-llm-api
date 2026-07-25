@@ -20,6 +20,10 @@ required-features = ["live"]
 name = "regenerate_dataset"
 path = "src/bin/regenerate_dataset.rs"
 
+[[bin]]
+name = "fixtures"
+path = "src/bin/fixtures.rs"
+
 [features]
 # The mock is offline by default: no reqwest, no TLS stack, no way to spend money
 # by accident during a GUI development loop.

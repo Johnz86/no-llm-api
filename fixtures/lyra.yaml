@@ -1,0 +1,25 @@
+id: conv-lyra
+description: Tool call, tool result, then a reply carrying a legacy function_call.
+turns:
+  - role: system
+    content: You are a supportive assistant that uses actionable advice.
+  - role: user
+    content: Help me unblock a failing integration test.
+  - role: assistant
+    finish_reason: tool_calls
+    tool_calls:
+      - id: call_01
+        type: function
+        function:
+          name: gather_logs
+          arguments: '{"level":"debug","service":"checkout"}'
+    usage: { prompt_tokens: 24, completion_tokens: 6, total_tokens: 30 }
+  - role: tool
+    content: '{"status":"ok","notes":"Captured logs"}'
+  - role: assistant
+    content: Diff the dependency tree, pin versions, and bisect recent merges.
+    finish_reason: stop
+    function_call:
+      name: summarize_logs
+      arguments: '{"include":"regressions"}'
+    usage: { prompt_tokens: 12, completion_tokens: 18, total_tokens: 30 }

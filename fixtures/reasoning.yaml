@@ -1,0 +1,10 @@
+id: conv-reasoning
+description: A thinking trace that streams as reasoning_content before the answer.
+turns:
+  - role: user
+    content: Think it through, then answer.
+  - role: assistant
+    finish_reason: stop
+    content: |-
+      <think>The user asked for the capital of France. That is Paris, no ambiguity.</think>Paris.
+    usage: { prompt_tokens: 12, completion_tokens: 20, total_tokens: 32 }

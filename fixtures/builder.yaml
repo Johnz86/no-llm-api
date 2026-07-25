@@ -1,0 +1,13 @@
+id: conv-builder
+description: Legacy function_call path, finishing with function_call.
+turns:
+  - role: system
+    content: You rely on function calls to scaffold internal tools.
+  - role: user
+    content: Draft a metrics dashboard for the growth squad.
+  - role: assistant
+    finish_reason: function_call
+    function_call:
+      name: create_dashboard
+      arguments: '{"team":"growth","widgets":3}'
+    usage: { prompt_tokens: 26, completion_tokens: 8, total_tokens: 34 }
