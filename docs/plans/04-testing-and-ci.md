@@ -56,7 +56,7 @@ Authored tests: 8 functions total.
 | `metadata[key]=value` query parsing | `src/http/routes.rs:297-337` | No | Hand-written `Deserialize` with `#[serde(flatten)]` + `deserialize_any`; highest-complexity untested code in the repo, and it degrades silently to "no filter". |
 | `order` validation -> 400 | `src/http/routes.rs:68-71,344-347` | No | |
 | 404 envelope | `src/http/routes.rs:389-397` | No | |
-| Error envelope shape | `src/http/routes.rs:379-387` | No | Emits only `message` + `type`. Spec `Error` requires `type,message,param,code` (`openapi.yaml:37735-37753`); `async-openai`'s `ApiError` (`AO/error.rs:79-84`) tolerates missing `param`/`code`, other clients may not. |
+| Error envelope shape | `src/http/routes.rs:379-387` | No | Emits only `message` + `type`. Spec `Error` requires `type,message,param,code` (`docs/spec/chat-completions.openapi.yaml:3268-3287`); `async-openai`'s `ApiError` (`AO/error.rs:79-84`) tolerates missing `param`/`code`, other clients may not. |
 | Malformed JSON body | axum default | No | Returns axum's plain-text 422, not the OpenAI envelope. |
 | `GET /` index | `src/http/routes.rs:56-61` | No | Reads relative `index.html`, so behaviour depends on process cwd. |
 | Dataset round-trip (write -> read) | `src/dataset.rs:395-460`, `rows_from_interaction:616-664` | No | Only the bundled sample is read; nothing writes then reads back. |
@@ -219,7 +219,7 @@ Until the injectable id/clock exists, use insta redactions (`".id" => "[id]"`, `
 injection afterwards - redactions hide exactly the fields a GUI uses for message keys.
 
 Also snapshot-worthy: the error envelope for 404, invalid `order`, and malformed JSON. These lock in the
-`type,message,param,code` shape from `openapi.yaml:37735-37753`.
+`type,message,param,code` shape from `docs/spec/chat-completions.openapi.yaml:3268-3287`.
 
 ## 5. Fixture strategy
 

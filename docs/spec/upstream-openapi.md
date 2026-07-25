@@ -33,6 +33,27 @@ Upstream's default branch is `main`. `raw.githubusercontent.com` still serves a
 legacy `master` alias, but the commits API returns 404 for it, so both scripts
 default to `main`.
 
+## What is tracked, and what is fetched
+
+| File | Tracked | What it is |
+| --- | --- | --- |
+| `docs/spec/chat-completions.openapi.yaml` | yes | The pruned extract: the five paths this mock implements plus their transitively referenced schemas, 144 KB. Generated, never hand-edited. |
+| `openapi.provenance.json` | yes | URL, upstream commit, date and sha256 of the full document the extract came from. |
+| `openapi.yaml` | no | The full 2.7 MB upstream document. Fetch it with `scripts/fetch-openapi.ps1` (or `.sh`) when you need to grep the whole surface. |
+
+Regenerate the extract after every refresh:
+
+```bash
+pwsh scripts/fetch-openapi.ps1          # or: bash scripts/fetch-openapi.sh
+cargo run --bin spec_extract            # rewrites the tracked extract
+cargo test --test spec                  # asserts it is self-contained
+```
+
+`tests/spec.rs` fails if the extract loses a path or cited schema, references a schema it does not
+contain, disagrees with the recorded provenance, turns the normalized `i64` seed bounds into
+strings, leaves implemented-surface citations aimed at the untracked document, or grows beyond
+150 KiB. That is what keeps the pruned copy trustworthy.
+
 ## Historical note: the two files this replaced
 
 Until 2026-07-25 the repository carried two stale October 2025 snapshots with

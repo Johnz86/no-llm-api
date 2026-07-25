@@ -7,7 +7,7 @@ list models, stream a reply, cancel it, and see a real error envelope - with no 
 
 | Source | What was read | Where |
 | --- | --- | --- |
-| OpenAI OpenAPI spec (local) | `Error` (required: `type`,`message`,`param`,`code`), `ErrorResponse`, `ListModelsResponse`, `Model`, `GET /models`, `GET /models/{model}` | `openapi.yaml:37735` (`Error`), `:37772` (`ErrorResponse`), `:42437` (`ListModelsResponse`), `:43830` (`Model`), `:8658` (`/models`), `:8735` (`/models/{model}`) |
+| OpenAI OpenAPI spec (tracked extract) | `Error` (required: `type`,`message`,`param`,`code`), `ErrorResponse`, `ListModelsResponse`, `Model`, `GET /models`, `GET /models/{model}` | `docs/spec/chat-completions.openapi.yaml:3268` (`Error`), `:3288` (`ErrorResponse`), `:3318` (`ListModelsResponse`), `:3347` (`Model`), `:1264` (`/models`), `:1340` (`/models/{model}`) |
 | openai-node (master) | `SSEDecoder.decode` ignores lines starting with `:`; terminator check `sse.data.startsWith('[DONE]')`; mid-stream `data.error` -> throws `APIError`; `finally { if (!done) controller.abort() }` | `src/core/streaming.ts` |
 | openai-node (master) | `APIError` reads `headers.get('x-request-id')` and `error.code` / `error.param` / `error.type` | `src/core/error.ts` |
 | async-openai 0.41.1 (cargo registry) | `stream()` breaks only on `message.data == "[DONE]"` (exact equality); uses `reqwest-eventsource` (comments ignored); `Model`/`ListModelResponse` shape; usage-chunk semantics | `AO/client.rs:770-830` (`stream()`), `AO/types/models/model.rs:5-20`, `AO/types/chat/chat_.rs:1178-1199` |
@@ -111,13 +111,13 @@ Present but unknown key -> `401`:
 ```
 
 Notes:
-- All four `Error` members are required by `openapi.yaml:37735-37753` and openai-node reads `code`/`param` off the body (`error.ts`). The current `ErrorBody` (`routes.rs`) emits only `message` + `type` -> `code` and `param` come back `undefined`.
+- All four `Error` members are required by `docs/spec/chat-completions.openapi.yaml:3268-3287` and openai-node reads `code`/`param` off the body (`error.ts`). The current `ErrorBody` (`routes.rs`) emits only `message` + `type` -> `code` and `param` come back `undefined`.
 - Also send `WWW-Authenticate: Bearer` on 401 and a `x-request-id` header on every response (openai-node stores it on errors; useful for correlating logs).
 - Never echo the full key in the message - mask as above.
 
 ## 4. Model catalogue
 
-`GET /v1/models` (and `/models`) response - exactly the spec shape (`openapi.yaml:42437` + `:43830`; matches `async_openai::types::Model`):
+`GET /v1/models` (and `/models`) response - exactly the spec shape (`docs/spec/chat-completions.openapi.yaml:3318` + `:3347`; matches `async_openai::types::Model`):
 
 ```json
 {
@@ -129,7 +129,7 @@ Notes:
 }
 ```
 
-`GET /v1/models/{model}` returns the single `Model` object, `404` with `code: "model_not_found"` otherwise (spec path `openapi.yaml:8735`).
+`GET /v1/models/{model}` returns the single `Model` object, `404` with `code: "model_not_found"` otherwise (spec path `docs/spec/chat-completions.openapi.yaml:1340`).
 
 Configuration - fixture-driven with an env override:
 

@@ -7,6 +7,9 @@
 
 # Reference material fetched locally, never committed
 /async-openai
+# The full upstream spec; `scripts/fetch-openapi.ps1` recreates it and
+# docs/spec/chat-completions.openapi.yaml is the tracked, pruned reference.
+/openapi.yaml
 
 # Local scratch
 tmp_patch

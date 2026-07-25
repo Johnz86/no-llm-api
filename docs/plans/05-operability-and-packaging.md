@@ -410,8 +410,8 @@ does not need real authn, but it should not be silent about being open.
   no-llm-api` is by far the cheapest install story for a test dependency and the `no_llm_api`
   lib target (`Cargo.toml:6-9`) is already the documented reuse surface (`README.md`, "Notes").
   Blockers to clear first: `Cargo.toml:1-4` has no `description`/`license`/`repository`/`readme`/
-  `keywords`/`categories`/`rust-version`; the 1.31 MB tracked `openapi.yaml` must be excluded via
-  `exclude = [...]` or removed (section 6); the crate name must be checked as available. Keeping
+  `keywords`/`categories`/`rust-version`; `openapi.yaml` is now untracked and explicitly excluded
+  from packages (section 6); the crate name must be checked as available. Keeping
   the lib+bin split in one crate is correct here - splitting into `no-llm-api-core` plus a thin
   bin buys nothing at this size.
 
@@ -441,12 +441,12 @@ endpoint variable is set - correct but undocumented precedence. Keys go straight
 
 ### Documentation set
 
-Status: the `GEMINI.md`, `task.md`, `chat_completions_scope.md` and `AGENTS.md` rows below all
-landed in the cleanup commit. The README rows are still open.
+Status: **DONE.** The cleanup commit reconciled the contributor documents, and the later CLI and
+packaging work added the README configuration table, scenarios, Docker and health routes.
 
 | File | Today | Decision |
 | --- | --- | --- |
-| `README.md` | user-facing, accurate, has the env table | **Canonical user doc.** Add CLI/`--help` output, scenarios, Docker, health routes. Keep the env table generated-checked by the test proposed in section 1. |
+| `README.md` | user-facing, accurate, has the env table | **DONE - canonical user doc.** It documents every CLI flag and environment fallback, scenarios, Docker and health routes; `tests/docs.rs` guards flag/env/scenario drift. |
 | `AGENTS.md` | contributor + agent conventions | **DONE.** Canonical contributor doc. The stale "tiktoken-rs already pulls in async-openai" and "there is no standalone `tests/` directory" claims were corrected, and the spec-refresh convention added. Feature matrix and doc-ownership table still open. |
 | `GEMINI.md` | duplicated README/AGENTS and was wrong in two places: it said `store` "handles the data storage and retrieval from Parquet files" (it is the in-memory `CompletionStore`) and that `openapi.yaml` is this project's API definition (it is the upstream OpenAI spec copy) | **DONE - deleted.** Two agent-instruction files with divergent architecture descriptions is a net negative. |
 | `task.md` | a work order whose deliverables had all shipped (rich dataset, recorder, live mode, e2e tests) | **DONE - deleted.** It read as pending work; git history retains it. |
@@ -455,20 +455,19 @@ landed in the cleanup commit. The README rows are still open.
 
 ### The OpenAPI copies
 
-Status: `openapi.yaml` is now the current upstream spec (2,827,615 bytes, OpenAPI 3.1.0, upstream
-commit `5c044be3bf3a`), fetched and provenance-recorded by `scripts/fetch-openapi.ps1` / `.sh`;
-`openapi.documented.yml` and the third copy inside the vendored clone are both gone. What remains
-open is the size of the tracked copy:
+Status: **DONE.** `docs/spec/chat-completions.openapi.yaml` is the tracked, self-contained 144 KB
+extract generated from the current upstream spec (OpenAPI 3.1.0, commit `5c044be3bf3a`). The full
+`openapi.yaml` is fetched and provenance-recorded by `scripts/fetch-openapi.ps1` / `.sh` but is no
+longer tracked; `openapi.documented.yml` and the third copy inside the vendored clone are gone.
 
-1. Generate `docs/spec/chat-completions.openapi.yaml`: the chat-completion paths plus their
+1. **DONE.** Generate `docs/spec/chat-completions.openapi.yaml`: the chat-completion paths plus their
    transitively referenced schemas only, expected well under 150 KB. Track that. It is the part
    we actually assert against, it diffs readably in review, and it keeps offline determinism.
 2. **DONE.** `scripts/fetch-openapi.ps1` / `.sh` download the spec, record URL, upstream commit,
    date and `sha256` in `openapi.provenance.json`, and offer a `-Check` mode that exits non-zero
    when the local copy is behind upstream. Process documented in `docs/spec/upstream-openapi.md`.
-   Still open: untracking the full copy once (1) exists.
-3. **DONE.** `AGENTS.md` records that `openapi.yaml` is upstream reference material, is a grep
-   target only, and must never be hand-edited.
+3. **DONE.** `AGENTS.md` records that the extract is generated reference material, the full spec is
+   an on-demand grep target, and neither must ever be hand-edited.
 
 History rewrite to purge the old 1.3 MB blob is not worth it for a repo this young; replacing it in
 HEAD is enough to keep clones and the crates.io tarball small.

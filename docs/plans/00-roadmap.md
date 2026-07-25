@@ -34,8 +34,8 @@ Verification baseline: `ASYNC_OPENAI_COMPAT=1 cargo test` passes; note this repo
 
 ## Delivered so far
 
-M1-M4 are complete and M5 is largely done. Verified with `cargo test` (158 test results across 11
-targets, no environment variables, no network) on both the default and `live` feature sets,
+M1-M4 are complete and M5 is largely done. Verified with `cargo test` (196 test results, no
+environment variables, no network) on both the default and `live` feature sets,
 `cargo clippy --all-targets -- -D warnings` on both, a running server, and a distroless container.
 
 | Commit | Milestone | Items |
@@ -45,16 +45,19 @@ targets, no environment variables, no network) on both the default and `live` fe
 | `3a9b8a3` | M1 | R3, R4, R5, R6, R7, R8, R15 |
 | `1ca52d1` | M2 | R12, R13, R14, R16, R17 |
 | `22edc92` | M3 | R18, R19, R20, R21, R22, R23 |
-| `6f97a58` | M4 | R24, R25, R26, R27, R28, R29, R38 |
+| `6f97a58` | M4/M5 | R24, R25, R26, R27, R28, R29, R38, R45 |
 | `f16bd52` | M5 (part) | R40, R41, R43, R44, R50 |
 | `bdaa813` | M4 | R30, R32 |
 | `6873dd0` | M4 | R33, R34 |
 | `1ac1612` | M4/M5 | R39, R49 |
 | `bd6ad79` | M5 | R42 |
+| `c26424f` | M4 | R31 |
+| `47b7183` | M4 | R35 |
+| `de86d6d` | M4 | R36, R37 |
+| `fe06e51` | M5 | R47 |
 
-Still open: R31 (typed request enums, the one L item on the critical path), R35 (`n > 1`),
-R36 and R37 (YAML fixture sets and behaviour-coverage fixtures), R45's README CLI-output section,
-R46 (pruned spec extract), R47 (release plumbing), R48 (Playwright e2e).
+Still open: R48 (Playwright e2e). R46 is complete in the current change; it replaces the tracked
+full OpenAPI document with a generated, self-contained extract and stable plan citations.
 
 ## Critical path
 
@@ -125,8 +128,8 @@ the row; more than one source means the proposals were merged here.
 | R42 | Live hardening: credentials into `Settings` as `Redacted`, one redaction pass before any parquet write, `data/live/` default + widened `.gitignore`, log-hygiene test, timeout/retry/concurrency caps | 05#10 (L2-L7) | M | M5 | R40, R24 |
 | R43 | Dockerfile (distroless nonroot, dependency-cache layer, baked sample dataset, `health` subcommand for HEALTHCHECK) + `.dockerignore` + GHCR publish | 05#7 | M | M5 | R6, R40, R41 |
 | R44 | `docker-compose.yml` (Open WebUI) + `docker-compose.demo.yml` (bundled `index.html`) + README walkthrough | 05#8 | S | M5 | R43, R4 |
-| R45 | Doc reconciliation: ~~delete `GEMINI.md`~~, ~~archive `task.md`~~, ~~promote `chat_completions_scope.md` to `docs/spec/`~~, ~~fix two stale `AGENTS.md` claims~~, ~~add the testing-layout rule~~, README env/CLI table (merged; everything but the CLI table landed in the cleanup commit) | 05#11, 04#10 | S | M5 | R24 |
-| R46 | OpenAPI slimming: track a pruned chat-completions extract, untrack the full `openapi.yaml`, ~~`scripts/fetch-openapi.*` with pinned sha256~~, ~~drop `openai-func-enums/`~~ (see decision D10; the fetch scripts and provenance file landed, the pruning did not) | 05#12 | S | M5 | - |
+| R45 | ~~Doc reconciliation: delete `GEMINI.md`, archive `task.md`, promote `chat_completions_scope.md` to `docs/spec/`, fix two stale `AGENTS.md` claims, add the testing-layout rule, README env/CLI table and drift test~~ | 05#11, 04#10 | S | M5 | R24 |
+| R46 | ~~OpenAPI slimming: track a pruned chat-completions extract, untrack the full `openapi.yaml`, add `scripts/fetch-openapi.*` with pinned sha256, drop `openai-func-enums/`~~ (see decision D10) | 05#12 | S | M5 | - |
 | R47 | Release plumbing: `CHANGELOG.md` with a Wire-behaviour section, `docs/versioning.md`, `x-no-llm-api-version` header, release workflow (5 targets + GHCR), crates.io metadata | 05#15 | M | M5 | R43 |
 | R48 | Playwright `e2e/` driving `index.html` (never part of `cargo test`) | 04#12 | M | M5 | R6 |
 | R49 | `--metrics` with six hand-rolled Prometheus counters | 05#14 | S | M5 | R39 |
@@ -150,7 +153,7 @@ Real disagreements between plans. Each needs a call before the owning milestone 
 | D7 | Non-spec response fields. 01B2: delete the request echoes, lean POST vs enriched GET/list. 03W7: keep the fields, add `skip_serializing_if`. | (a) 01 (b) 03 (c) both | 03's is one line per field and lands today; 01's is spec-accurate and matches the spec's own `listChatCompletions` example. They are not exclusive. | Both, in order: R16 (03) as the same-day stopgap, R30 (01) as the real fix. Do not stop at R16. |
 | D8 | **SETTLED.** Vendored `./async-openai` clone as the reference. 01 and 03 cite it; 05 s6 showed it was version 0.30.1 while we depend on 0.41.1. | (a) keep (b) pin to v0.41.1 (c) use the cargo registry copy | A skewed reference clone is worse than none - it invents constraints the real client does not have. | (c). Both untracked clones (`./async-openai`, `./openai-func-enums`) were deleted in the cleanup commit; `AGENTS.md` now points at `~/.cargo/registry/src/*/async-openai-0.41.1/`, which is guaranteed to match `Cargo.lock`. Citations in plans 01 and 03 that use `./async-openai/...` paths refer to the deleted 0.30.1 clone - re-resolve them against the registry copy. |
 | D9 | Where the stream loop lives. 02: new `src/sim/stream.rs`. 03W6: rewrite in place in `routes.rs`. | (a)/(b) | Doing R10/R11/R12 in `routes.rs` and then moving them for R26 means rewriting the same loop twice. | Extract to `src/sim/stream.rs` once, during R11, consumer-driven (`async_stream`). Sequencing decision, not a design one - but it must be made before M2 starts. |
-| D10 | **SETTLED.** Spec citations used to point at `openapi.documented.yml`, an untracked stale snapshot; the tracked copy was a stale 3.0.0 down-conversion. | (a) track the big file (b) track a pruned extract (c) leave it | Line-number citations into an untracked file cannot be checked by anyone who clones the repo, which quietly rots every acceptance criterion that references a schema. | (a) for now: `openapi.yaml` was refreshed to the current upstream 3.1.0 spec (2.7 MB, commit `5c044be3bf3a`, 2026-07-23) via `scripts/fetch-openapi.ps1`/`.sh`, provenance in `openapi.provenance.json`, process in `docs/spec/upstream-openapi.md`. `openapi.documented.yml` was deleted and every citation in plans 01-04 re-anchored to the tracked file. R46's pruned extract remains the end state because it makes line numbers stable; until then each citation also names its schema - prefer the name. |
+| D10 | **SETTLED.** Spec citations used to point at `openapi.documented.yml`, an untracked stale snapshot; the tracked copy was a stale 3.0.0 down-conversion. | (a) track the big file (b) track a pruned extract (c) leave it | Line-number citations into an untracked file cannot be checked by anyone who clones the repo, which quietly rots every acceptance criterion that references a schema. | (b): `docs/spec/chat-completions.openapi.yaml` is generated from the current upstream 3.1.0 spec (commit `5c044be3bf3a`, 2026-07-23), records its source commit and sha256, and contains the five implemented paths plus their transitively referenced schemas. `openapi.yaml` is gitignored and fetched on demand; provenance and refresh process remain tracked. Plan citations now target stable lines in the extract, with `FULL_SPEC` reserved for deliberately out-of-scope paths. |
 
 ## First three commits
 
@@ -209,6 +212,6 @@ assertion. Plan 03's source table originally claimed the models API was not feat
 | Determinism work (M3) invalidates fixtures and snapshots written in M2 | Snapshots taken before `IdentityMode` need re-approval; the fallback answer for off-script prompts changes | Land R21 before R22; until then use `insta` redactions for `id`/`created`/`request_id` only, and snapshot only prompts that match a script (04 s4). |
 | Timing assertions flake on CI runners | A flaky pacing test gets `#[ignore]`d, and the product's core knob goes unverified again | Assert median inter-frame gap with 50% tolerance, keep all timing tests in one file, and add one strict lower-bound test at `TOKENS_PER_SECOND=2` (04 s3). Prefer `tokio::time::pause` where the harness allows. |
 | Live mode drags TLS and money into an offline mock | `reqwest`/`rustls`/`ring`/`secrecy` are in the default build today; an accidental live run during a GUI dev loop bills real money | R40 first in M5 (`default = []`), then R42's caps and redaction. Keep `NO_LLM_API_LIVE=1` as the single opt-in test gate and blank it in CI (04 s6). |
-| Spec citations rot (decision D10) | Line numbers in plans 01-04 point at `openapi.yaml` as of upstream commit `5c044be3bf3a`; the next `scripts/fetch-openapi.ps1` run shifts every one of them | Each citation also names its schema or path - prefer the name. Run `scripts/fetch-openapi.ps1 -Check` before trusting a line number, and land R46's pruned extract to make them stable. |
+| Spec citations rot (decision D10) | An upstream refresh can move or remove schemas and silently invalidate plan evidence | Plans 01-04 now cite stable lines in `docs/spec/chat-completions.openapi.yaml` (R46, 144 KB, self-contained). `tests/spec.rs` guards required paths/schemas, provenance, dangling references, size and citations; fetch the full document only for deliberately out-of-scope paths. |
 | Scope creep from five plans into one sprint | 50 rows is more than days of work; the temptation is to start at R50 | The milestone column is the contract. Nothing from M4/M5 starts before its milestone's exit criterion is met, and the non-goals table above is binding. |
 | Control plane turns the mock into an attack surface | On-by-default admin routes plus ignored `Authorization` on a published container port (05 s4) | Decision D1's loopback-gated default, WARN on non-loopback bind with auth off, and 02's header redaction in the request log. |
