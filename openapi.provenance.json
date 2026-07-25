@@ -1,0 +1,11 @@
+﻿{
+    "source":  "https://github.com/openai/openai-openapi/blob/main/openapi.yaml",
+    "upstream_commit":  "5c044be3bf3a42854e99e34616564eeb2124a317",
+    "upstream_commit_date":  "2026-07-23T15:27:11Z",
+    "upstream_subject":  "Add organization and project hard spend limit management endpoints",
+    "fetched_at":  "2026-07-25T05:59:52Z",
+    "sha256":  "b58d6cd94c881bdfd6a940bdc4db009e2c9b455accf8fd6a8b712458bc30c0da",
+    "bytes":  2827615,
+    "openapi_version":  "3.1.0",
+    "info_version":  "2.3.0"
+}

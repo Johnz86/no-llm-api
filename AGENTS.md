@@ -5,6 +5,7 @@
 - Module-level unit tests live in inline `#[cfg(test)]` blocks. Cross-module and client-contract tests live in `tests/`; `tests/async_openai.rs` boots the router in-process and drives it with the real client.
 - Generated parquet fixtures reside under `data/` (created on demand). Keep additional scripted datasets there to avoid polluting `src/`.
 - Plans and design notes live in `docs/`; start at `docs/plans/00-roadmap.md`. The distilled Chat Completions contract is `docs/spec/chat-completions-scope.md`.
+- `openapi.yaml` is a verbatim copy of the upstream OpenAI spec, refreshed with `scripts/fetch-openapi.ps1` (or `.sh`), which records the upstream commit and sha256 in `openapi.provenance.json`. Never hand-edit it; upstream's `info.version` is a useless staleness signal, so check the provenance file. See `docs/spec/upstream-openapi.md`.
 
 ## Build, Test, and Development Commands
 - `cargo build` compiles the API server with the current profile.
