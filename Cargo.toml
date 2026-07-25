@@ -2,6 +2,14 @@
 name = "no-llm-api"
 version = "0.1.0"
 edition = "2024"
+description = "A deterministic, offline mock of the OpenAI Chat Completions API for testing chat GUIs"
+repository = "https://github.com/jjakubcik/no-llm-api"
+readme = "README.md"
+keywords = ["openai", "mock", "testing", "sse", "chat"]
+categories = ["development-tools::testing", "web-programming::http-server"]
+# Publishing is blocked until a license is chosen; see docs/versioning.md.
+publish = false
+exclude = ["openapi.yaml", "openapi.provenance.json", "docs/", "e2e/"]
 
 [lib]
 name = "no_llm_api"

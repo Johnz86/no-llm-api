@@ -767,6 +767,25 @@ async fn alternatives_are_the_same_on_every_run() {
 }
 
 #[tokio::test]
+async fn every_response_states_which_build_answered() {
+    let fixture = fixture(1000);
+    for (method, uri) in [
+        ("GET", "/health"),
+        ("GET", "/v1/models"),
+        ("GET", "/v1/nope"),
+    ] {
+        let (_, headers, _) = send(fixture.app.clone(), method, uri, None).await;
+        assert_eq!(
+            headers
+                .get("x-no-llm-api-version")
+                .and_then(|value| value.to_str().ok()),
+            Some(env!("CARGO_PKG_VERSION")),
+            "{method} {uri} did not state its version"
+        );
+    }
+}
+
+#[tokio::test]
 async fn streamed_responses_disable_proxy_buffering() {
     use axum::body::Body;
     use axum::http::Request;

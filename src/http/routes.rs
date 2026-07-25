@@ -35,6 +35,8 @@ const REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
 const ACCEL_BUFFERING: HeaderName = HeaderName::from_static("x-accel-buffering");
 /// Which rung of the matching ladder produced the reply; for test triage only.
 const SIMULATE_MATCH: HeaderName = HeaderName::from_static("x-simulate-match");
+/// Which build answered, so a CI job can assert it talked to the container it meant to.
+const VERSION_HEADER: HeaderName = HeaderName::from_static("x-no-llm-api-version");
 
 #[derive(Clone)]
 pub struct AppState {
@@ -223,6 +225,7 @@ fn cors_layer(settings: &CorsSettings) -> CorsLayer {
         .allow_headers(AllowHeaders::mirror_request())
         .expose_headers(ExposeHeaders::list([
             REQUEST_ID,
+            VERSION_HEADER,
             header::RETRY_AFTER,
             HeaderName::from_static("x-ratelimit-limit-requests"),
             HeaderName::from_static("x-ratelimit-remaining-requests"),
@@ -231,7 +234,8 @@ fn cors_layer(settings: &CorsSettings) -> CorsLayer {
         .max_age(Duration::from_secs(600))
 }
 
-/// Echoes a caller-supplied `x-request-id` or mints one, on every response.
+/// Echoes a caller-supplied `x-request-id` or mints one, and stamps the build
+/// version, on every response.
 async fn request_id_layer(mut request: axum::extract::Request, next: Next) -> Response {
     let incoming = request
         .headers()
@@ -243,10 +247,20 @@ async fn request_id_layer(mut request: axum::extract::Request, next: Next) -> Re
     if let Ok(value) = HeaderValue::from_str(&request_id) {
         request.headers_mut().insert(&REQUEST_ID, value.clone());
         let mut response = next.run(request).await;
-        response.headers_mut().insert(&REQUEST_ID, value);
+        let headers = response.headers_mut();
+        headers.insert(&REQUEST_ID, value);
+        headers.insert(
+            &VERSION_HEADER,
+            HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
+        );
         return response;
     }
-    next.run(request).await
+    let mut response = next.run(request).await;
+    response.headers_mut().insert(
+        &VERSION_HEADER,
+        HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
+    );
+    response
 }
 
 async fn method_not_allowed() -> Response {

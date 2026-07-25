@@ -278,4 +278,6 @@ origin and the requested headers, so SDK-specific headers never need an allow-li
 
 - `docs/plans/00-roadmap.md` - the plan of record: milestones, work items, and open decisions.
 - `docs/spec/chat-completions-scope.md` - the distilled Chat Completions contract this mock targets.
+- `docs/versioning.md` - what a version bump means for a consumer, and the release checklist.
+- `CHANGELOG.md` - every release, with wire-behaviour changes called out first.
 - `AGENTS.md` - repository conventions for contributors and coding agents.
