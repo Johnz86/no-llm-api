@@ -107,3 +107,9 @@ Responses include usage data, tool/function call metadata, finish reasons, audio
 - Streaming completions emit SSE chunks at the configured token rate and always terminate with `[DONE]`. When `stream_options.include_usage=true`, a final usage chunk is delivered.
 - Only completions created with `"store": true` are persisted for later retrieval, metadata updates, or message pagination.
 - The repository exposes itself as a library (`no_llm_api`) so integration tests and custom binaries can reuse internal modules.
+
+## Documentation
+
+- `docs/plans/00-roadmap.md` - the plan of record: milestones, work items, and open decisions.
+- `docs/spec/chat-completions-scope.md` - the distilled Chat Completions contract this mock targets.
+- `AGENTS.md` - repository conventions for contributors and coding agents.

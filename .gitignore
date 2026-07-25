@@ -5,11 +5,8 @@
 .env.local
 *.pem
 
-# Vendored upstream clones kept for local reference only
+# Reference material fetched locally, never committed
 /async-openai
-/openai-func-enums
-
-# Large generated/duplicated spec copies
 /openapi.documented.yml
 
 # Local scratch

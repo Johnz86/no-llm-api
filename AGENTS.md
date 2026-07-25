@@ -1,9 +1,10 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `src/main.rs` bootstraps settings, data seeding, and Axum routing. Core modules live beside it (`config`, `dataset`, `http`, `model`, `service`, `store`).
-- Each module keeps its focused unit tests in an inline `#[cfg(test)]` block; there is no standalone `tests/` directory.
+- `src/main.rs` bootstraps settings, data seeding, and Axum routing. Core modules live beside it (`config`, `dataset`, `http`, `live`, `model`, `service`, `store`, `tokenizer`) and are re-exported by `src/lib.rs` so tests and the `recorder`/`regenerate_dataset` binaries can reuse them.
+- Module-level unit tests live in inline `#[cfg(test)]` blocks. Cross-module and client-contract tests live in `tests/`; `tests/async_openai.rs` boots the router in-process and drives it with the real client.
 - Generated parquet fixtures reside under `data/` (created on demand). Keep additional scripted datasets there to avoid polluting `src/`.
+- Plans and design notes live in `docs/`; start at `docs/plans/00-roadmap.md`. The distilled Chat Completions contract is `docs/spec/chat-completions-scope.md`.
 
 ## Build, Test, and Development Commands
 - `cargo build` compiles the API server with the current profile.
@@ -30,12 +31,14 @@
 - PRs should summarize behavior shifts, list manual verification commands, and include screenshots when front-end consumers are affected.
 
 ## Security & Configuration Tips
-- Never commit real OpenAI credentials; the service relies solely on local parquet data.
+- Never commit real OpenAI credentials. `.env` is gitignored; document new variables in `.env.example` and `README.md`.
+- The default `parquet` dataset source needs no credentials and makes no network calls; only `DATASET_SOURCE=live` talks to a real backend.
 - Validate new parquet fixtures locally with `cargo test` and keep example datasets free of sensitive content.
 - Document any new environment variables-especially `TOKENIZER_MODEL` presets-in `README.md` alongside their defaults.
 
 ## Async-openai Compatibility Notes
-- `tiktoken-rs` already pulls in `async-openai`, so the client is available without extra dependencies.
-- Planned schema expansion will add optional columns for refusals, tool/function calls, audio metadata, finish reasons, and usage breakdowns so recorded datasets can round-trip all async-openai fields.
-- We intend to ship a recorder that can proxy real OpenAI/Azure responses (keys via `.env`) and persist them as parquet fixtures for deterministic playback.
-- Future end-to-end tests will boot the Axum server, drive it with async-openai (streaming and non-streaming), and assert full API compatibility; keep this in mind when changing request/response models or SSE behaviour.
+- `async-openai` is an explicit dependency (`0.41.1`, features `["chat-completion"]`). Its types live under `async_openai::types::chat`.
+- When checking what the reference client expects, read the crate source that matches `Cargo.lock`: `~/.cargo/registry/src/index.crates.io-*/async-openai-0.41.1/src/types/chat/`. Do not vendor an upstream clone into the repo; a clone that drifts from the locked version invents constraints the real client does not have.
+- The parquet schema already carries optional columns for refusals, tool/function calls, audio metadata, finish reasons, and usage breakdowns so recorded datasets round-trip async-openai fields.
+- `src/bin/recorder.rs` proxies real OpenAI/Azure responses (credentials via `.env`) and persists them as parquet fixtures for deterministic playback.
+- `tests/async_openai.rs` boots the Axum server and drives it with the real client (non-streamed, streamed with usage, tool calls). It is currently gated behind `ASYNC_OPENAI_COMPAT=1`; keep it passing when changing request/response models or SSE behaviour.
