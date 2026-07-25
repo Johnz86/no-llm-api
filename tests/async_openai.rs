@@ -93,6 +93,47 @@ async fn async_openai_compatibility() -> anyhow::Result<()> {
         .unwrap_or(FinishReason::Stop);
     assert_eq!(finish, FinishReason::ToolCalls);
 
+    // The same tool call, streamed: async-openai must accept every fragment.
+    let mut tool_stream_request = request_with_text("Help me unblock a failing integration test.");
+    tool_stream_request.stream = true;
+    let mut stream = client
+        .chat()
+        .create_stream(convert_request(&tool_stream_request)?)
+        .await?;
+    let mut arguments = String::new();
+    let mut names = Vec::new();
+    let mut saw_tool_finish = false;
+    while let Some(event) = stream.next().await {
+        let chunk = event?;
+        for choice in &chunk.choices {
+            if let Some(calls) = &choice.delta.tool_calls {
+                for call in calls {
+                    if let Some(function) = &call.function {
+                        if let Some(name) = &function.name {
+                            names.push(name.clone());
+                        }
+                        if let Some(fragment) = &function.arguments {
+                            assert!(
+                                !fragment.is_empty(),
+                                "an empty arguments fragment breaks tool execution"
+                            );
+                            arguments.push_str(fragment);
+                        }
+                    }
+                }
+            }
+            if choice.finish_reason.is_some() {
+                saw_tool_finish = true;
+            }
+        }
+    }
+    assert!(!names.is_empty(), "the function name must be streamed");
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&arguments).is_ok(),
+        "streamed arguments must reassemble into JSON: {arguments}"
+    );
+    assert!(saw_tool_finish);
+
     // Model discovery: three of five surveyed GUIs cannot reach chat without this.
     let models = client.models().list().await?;
     assert_eq!(models.object, "list");

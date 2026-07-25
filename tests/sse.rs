@@ -5,7 +5,10 @@ mod support;
 use std::time::Duration;
 
 use support::sse::collect_sse;
-use support::{PLAIN_PROMPT, PLAIN_REPLY, UNICODE_PROMPT, UNICODE_REPLY, fixture, stream_body};
+use support::{
+    PLAIN_PROMPT, PLAIN_REPLY, REFUSAL_PROMPT, REFUSAL_TEXT, TOOL_PROMPT, UNICODE_PROMPT,
+    UNICODE_REPLY, fixture, stream_body,
+};
 
 #[tokio::test]
 async fn multi_byte_reply_streams_byte_exact_and_terminates() {
@@ -112,6 +115,193 @@ async fn pacing_follows_the_configured_token_rate() {
     assert!(
         gap >= expected / 2 && gap <= expected * 3,
         "median gap {gap:?} is not within tolerance of {expected:?}"
+    );
+}
+
+#[tokio::test]
+async fn opening_frame_is_role_only_and_terminal_frame_is_empty() {
+    let fixture = fixture(1000);
+    let transcript = collect_sse(fixture.app.clone(), stream_body(PLAIN_PROMPT)).await;
+    transcript.assert_well_formed();
+
+    let chunks = transcript.chunks();
+    let first = &chunks[0]["choices"][0]["delta"];
+    assert_eq!(first["role"], "assistant");
+    assert_eq!(first["content"], "", "the opener carries an empty content");
+
+    let last = &chunks[chunks.len() - 1];
+    assert_eq!(
+        last["choices"][0]["delta"]
+            .as_object()
+            .expect("delta object")
+            .len(),
+        0,
+        "the terminal frame must be delta: {{}}: {last}"
+    );
+    assert!(!last["choices"][0]["finish_reason"].is_null());
+}
+
+#[tokio::test]
+async fn deltas_never_carry_null_members_or_audio() {
+    let fixture = fixture(1000);
+    let transcript = collect_sse(fixture.app.clone(), stream_body(PLAIN_PROMPT)).await;
+
+    for chunk in transcript.chunks() {
+        let delta = chunk["choices"][0]["delta"].as_object().unwrap().clone();
+        for (key, value) in delta {
+            assert!(
+                !value.is_null(),
+                "delta member '{key}' was serialised as null: {chunk}"
+            );
+            assert_ne!(key, "audio", "audio has no place in a delta: {chunk}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn chunks_carry_the_service_tier() {
+    let fixture = fixture(1000);
+    let transcript = collect_sse(fixture.app.clone(), stream_body(PLAIN_PROMPT)).await;
+    for chunk in transcript.chunks() {
+        assert_eq!(chunk["service_tier"], "default", "{chunk}");
+    }
+}
+
+#[tokio::test]
+async fn tool_calls_stream_as_indexed_fragments() {
+    let fixture = fixture(1000);
+    let transcript = collect_sse(fixture.app.clone(), stream_body(TOOL_PROMPT)).await;
+    transcript.assert_well_formed();
+
+    assert_eq!(transcript.finish_reasons(), vec!["tool_calls".to_string()]);
+
+    let mut openers = 0;
+    let mut argument_frames: std::collections::BTreeMap<u64, Vec<String>> = Default::default();
+    for chunk in transcript.chunks() {
+        let Some(calls) = chunk["choices"][0]["delta"]["tool_calls"].as_array() else {
+            continue;
+        };
+        for call in calls {
+            let index = call["index"]
+                .as_u64()
+                .unwrap_or_else(|| panic!("index is required on every fragment: {chunk}"));
+            match call.get("id").and_then(|value| value.as_str()) {
+                Some(id) => {
+                    openers += 1;
+                    assert!(!id.is_empty());
+                    assert_eq!(call["type"], "function");
+                    assert!(
+                        call["function"]["name"].as_str().is_some(),
+                        "the opening fragment names the function: {chunk}"
+                    );
+                    assert!(
+                        call["function"].get("arguments").is_none(),
+                        "the opening fragment must not send empty arguments: {chunk}"
+                    );
+                }
+                None => {
+                    assert!(
+                        call.get("type").is_none(),
+                        "only the first fragment carries type: {chunk}"
+                    );
+                    let arguments = call["function"]["arguments"]
+                        .as_str()
+                        .unwrap_or_else(|| panic!("expected an arguments fragment: {chunk}"));
+                    assert!(
+                        !arguments.is_empty(),
+                        "arguments fragments are never empty: {chunk}"
+                    );
+                    argument_frames
+                        .entry(index)
+                        .or_default()
+                        .push(arguments.to_string());
+                }
+            }
+        }
+    }
+
+    assert_eq!(openers, 2, "both parallel calls must open");
+    assert_eq!(argument_frames.len(), 2, "both calls must send arguments");
+    for (index, fragments) in &argument_frames {
+        assert!(
+            fragments.len() >= 2,
+            "call {index} arguments must span at least two frames: {fragments:?}"
+        );
+        let joined = fragments.concat();
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&joined).is_ok(),
+            "call {index} fragments must reassemble into JSON: {joined}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn refusals_stream_as_refusal_deltas() {
+    let fixture = fixture(1000);
+    let transcript = collect_sse(fixture.app.clone(), stream_body(REFUSAL_PROMPT)).await;
+    transcript.assert_well_formed();
+
+    let refusal: String = transcript
+        .chunks()
+        .iter()
+        .filter_map(|chunk| {
+            chunk["choices"][0]["delta"]["refusal"]
+                .as_str()
+                .map(str::to_owned)
+        })
+        .collect();
+    assert_eq!(refusal, REFUSAL_TEXT);
+    assert_eq!(
+        transcript.finish_reasons(),
+        vec!["content_filter".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn non_streamed_response_content_is_always_a_string() {
+    let fixture = fixture(1000);
+    let (status, _, text) = support::send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/chat/completions",
+        Some(serde_json::json!({
+            "model": "mock-gpt-4o",
+            "messages": [{
+                "role": "user",
+                "content": [{ "type": "text", "text": PLAIN_PROMPT }]
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert!(
+        value["choices"][0]["message"]["content"].is_string(),
+        "message.content must serialise as a string: {text}"
+    );
+}
+
+#[tokio::test]
+async fn stream_null_is_treated_as_not_streaming() {
+    let fixture = fixture(1000);
+    let (status, headers, _) = support::send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/chat/completions",
+        Some(serde_json::json!({
+            "model": "mock-gpt-4o",
+            "stream": null,
+            "messages": [{ "role": "user", "content": PLAIN_PROMPT }]
+        })),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        headers
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.starts_with("application/json")),
+        Some(true)
     );
 }
 

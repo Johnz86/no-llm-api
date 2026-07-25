@@ -21,6 +21,33 @@ pub const UNICODE_REPLY: &str = "cafe\u{301} \u{1F680}\u{1F44D} \u{1F469}\u{200D
 pub const PLAIN_PROMPT: &str = "plain please";
 pub const PLAIN_REPLY: &str = "All good here.";
 
+pub const TOOL_PROMPT: &str = "check the weather in two cities";
+pub const REFUSAL_PROMPT: &str = "do something disallowed";
+pub const REFUSAL_TEXT: &str = "I'm sorry, but I can't help with that request.";
+
+/// Two parallel tool calls with arguments long enough to be split.
+pub fn tool_calls_json() -> String {
+    serde_json::json!([
+        {
+            "id": "call_alpha",
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "arguments": "{\"city\":\"Berlin\",\"unit\":\"celsius\"}"
+            }
+        },
+        {
+            "id": "call_beta",
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "arguments": "{\"city\":\"Tokyo\",\"unit\":\"celsius\"}"
+            }
+        }
+    ])
+    .to_string()
+}
+
 pub struct Fixture {
     pub app: axum::Router,
     pub cancels: Arc<CancelCounter>,
@@ -33,11 +60,23 @@ pub fn fixture(tokens_per_second: u32) -> Fixture {
 }
 
 pub fn default_rows() -> Vec<DatasetRow<'static>> {
+    let mut tool_reply = row("conv-tools", 1, "assistant", "", Some("tool_calls"));
+    tool_reply.content = None;
+    tool_reply.tool_calls = Some(Cow::Owned(tool_calls_json()));
+
+    let mut refusal_reply = row("conv-refusal", 1, "assistant", "", Some("content_filter"));
+    refusal_reply.content = None;
+    refusal_reply.refusal = Some(Cow::Borrowed(REFUSAL_TEXT));
+
     vec![
         row("conv-unicode", 0, "user", UNICODE_PROMPT, None),
         row("conv-unicode", 1, "assistant", UNICODE_REPLY, Some("stop")),
         row("conv-plain", 0, "user", PLAIN_PROMPT, None),
         row("conv-plain", 1, "assistant", PLAIN_REPLY, Some("stop")),
+        row("conv-tools", 0, "user", TOOL_PROMPT, None),
+        tool_reply,
+        row("conv-refusal", 0, "user", REFUSAL_PROMPT, None),
+        refusal_reply,
     ]
 }
 

@@ -14,10 +14,12 @@ use axum::response::sse::Event;
 use futures::Stream;
 use tiktoken_rs::CoreBPE;
 
-use crate::model::{ChatCompletionChunk, ChatCompletionResponse, ChatRole, FinishReason};
-use crate::service::{
-    PreparedCompletion, chunk_from_delta, delta_for_text, empty_delta, usage_chunk,
+use crate::model::{
+    ChatCompletionChunk, ChatCompletionChunkDelta, ChatCompletionMessageToolCall,
+    ChatCompletionMessageToolCallChunk, ChatCompletionResponse, ChatRole, FinishReason,
+    FunctionCallChunk,
 };
+use crate::service::{PreparedCompletion, chunk_from_delta, usage_chunk};
 
 /// Counts streams abandoned by the consumer before the terminal frame.
 #[derive(Debug, Default)]
@@ -34,9 +36,13 @@ impl CancelCounter {
 }
 
 /// Everything needed to replay one completion as SSE, resolved up front.
+///
+/// The frame list is the whole simulation: a role-only opener, content-only
+/// middles, refusal or tool-call fragments, and a terminal `delta: {}` carrying
+/// `finish_reason`. Timing is the only thing left to do at stream time.
 pub struct StreamPlan {
     pub response: ChatCompletionResponse,
-    pub pieces: Vec<String>,
+    pub frames: Vec<ChatCompletionChunkDelta>,
     pub include_usage: bool,
     pub gap: Duration,
 }
@@ -44,9 +50,10 @@ pub struct StreamPlan {
 impl StreamPlan {
     pub fn new(prepared: PreparedCompletion, tokenizer: &CoreBPE, rate: NonZeroU32) -> Self {
         let pieces = token_pieces(tokenizer, &prepared.tokens);
+        let frames = build_frames(&prepared.response, &pieces, tokenizer);
         Self {
             response: prepared.response,
-            pieces,
+            frames,
             include_usage: prepared.include_usage_chunk,
             gap: Duration::from_secs_f64(1.0 / f64::from(rate.get())),
         }
@@ -58,6 +65,139 @@ impl StreamPlan {
             .first()
             .and_then(|choice| choice.finish_reason.clone())
     }
+}
+
+/// Builds the ordered delta sequence for one completion.
+fn build_frames(
+    response: &ChatCompletionResponse,
+    pieces: &[String],
+    tokenizer: &CoreBPE,
+) -> Vec<ChatCompletionChunkDelta> {
+    let mut frames = vec![ChatCompletionChunkDelta {
+        role: Some(ChatRole::Assistant),
+        content: Some(String::new()),
+        ..Default::default()
+    }];
+
+    frames.extend(
+        pieces
+            .iter()
+            .filter(|piece| !piece.is_empty())
+            .map(|piece| ChatCompletionChunkDelta {
+                content: Some(piece.clone()),
+                ..Default::default()
+            }),
+    );
+
+    let choice = response.choices.first();
+
+    if let Some(refusal) = choice.and_then(|choice| choice.message.refusal.as_deref()) {
+        let tokens = tokenizer.encode_with_special_tokens(refusal);
+        frames.extend(
+            token_pieces(tokenizer, &tokens)
+                .into_iter()
+                .filter(|piece| !piece.is_empty())
+                .map(|piece| ChatCompletionChunkDelta {
+                    refusal: Some(piece),
+                    ..Default::default()
+                }),
+        );
+    }
+
+    if let Some(calls) = choice.and_then(|choice| choice.message.tool_calls.as_deref()) {
+        frames.extend(tool_call_frames(calls));
+    }
+
+    if let Some(function_call) = choice.and_then(|choice| choice.message.function_call.as_ref()) {
+        frames.push(ChatCompletionChunkDelta {
+            function_call: Some(function_call.clone()),
+            ..Default::default()
+        });
+    }
+
+    frames
+}
+
+/// Streams tool calls the way the API does: an opening fragment carrying `id`,
+/// `type` and the function name, then argument fragments interleaved across
+/// parallel calls. `arguments` is never an empty string, which breaks clients
+/// that treat `""` as a complete payload.
+fn tool_call_frames(calls: &[ChatCompletionMessageToolCall]) -> Vec<ChatCompletionChunkDelta> {
+    let mut frames: Vec<ChatCompletionChunkDelta> = calls
+        .iter()
+        .enumerate()
+        .map(|(index, call)| ChatCompletionChunkDelta {
+            tool_calls: Some(vec![ChatCompletionMessageToolCallChunk {
+                index,
+                id: call.id.clone(),
+                r#type: call
+                    .r#type
+                    .clone()
+                    .or(Some(crate::model::ChatCompletionToolType::Function)),
+                function: Some(FunctionCallChunk {
+                    name: call
+                        .function
+                        .as_ref()
+                        .and_then(|function| function.name.clone()),
+                    arguments: None,
+                }),
+            }]),
+            ..Default::default()
+        })
+        .collect();
+
+    let fragments: Vec<Vec<String>> = calls
+        .iter()
+        .map(|call| {
+            split_arguments(
+                call.function
+                    .as_ref()
+                    .and_then(|function| function.arguments.as_deref())
+                    .unwrap_or_default(),
+            )
+        })
+        .collect();
+
+    let rounds = fragments.iter().map(Vec::len).max().unwrap_or(0);
+    for round in 0..rounds {
+        for (index, call_fragments) in fragments.iter().enumerate() {
+            if let Some(fragment) = call_fragments.get(round) {
+                frames.push(ChatCompletionChunkDelta {
+                    tool_calls: Some(vec![ChatCompletionMessageToolCallChunk {
+                        index,
+                        id: None,
+                        r#type: None,
+                        function: Some(FunctionCallChunk {
+                            name: None,
+                            arguments: Some(fragment.clone()),
+                        }),
+                    }]),
+                    ..Default::default()
+                });
+            }
+        }
+    }
+
+    frames
+}
+
+/// Splits an argument payload over at least two non-empty fragments when it is
+/// long enough, so clients that assemble fragments are actually exercised.
+fn split_arguments(arguments: &str) -> Vec<String> {
+    if arguments.is_empty() {
+        return Vec::new();
+    }
+    let mut boundary = arguments.len() / 2;
+    while boundary > 0 && !arguments.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    if boundary == 0 || boundary == arguments.len() {
+        return vec![arguments.to_string()];
+    }
+    vec![
+        arguments[..boundary].to_string(),
+        arguments[boundary..].to_string(),
+    ]
 }
 
 /// Splits a token sequence into per-token text pieces that are always valid UTF-8.
@@ -132,25 +272,14 @@ pub fn sse_stream(
     async_stream::stream! {
         let mut guard = CancelGuard { cancels, done: false };
         let finish = plan.finish_reason();
-        let mut emitted = false;
 
-        for (index, piece) in plan.pieces.iter().enumerate() {
+        for (index, delta) in plan.frames.iter().enumerate() {
             if index > 0 && !plan.gap.is_zero() {
                 tokio::time::sleep(plan.gap).await;
             }
-            if piece.is_empty() {
-                continue;
-            }
-            let chunk = chunk_from_delta(
-                &plan.response,
-                delta_for_text(piece.clone(), !emitted),
-                None,
-            );
+            let chunk = chunk_from_delta(&plan.response, delta.clone(), None);
             match encode(&chunk) {
-                Ok(event) => {
-                    emitted = true;
-                    yield Ok(event);
-                }
+                Ok(event) => yield Ok(event),
                 Err(event) => {
                     yield Ok(event);
                     yield Ok(done_event());
@@ -160,26 +289,8 @@ pub fn sse_stream(
             }
         }
 
-        let mut final_delta = empty_delta();
-        if let Some(choice) = plan.response.choices.first() {
-            if !emitted {
-                final_delta.role = Some(ChatRole::Assistant);
-                final_delta.content = choice
-                    .message
-                    .content
-                    .as_ref()
-                    .map(|content| content.render().into_owned())
-                    .filter(|text| !text.is_empty());
-            }
-            final_delta.refusal = choice.message.refusal.clone();
-            final_delta.function_call = choice.message.function_call.clone();
-            final_delta.tool_calls = choice.message.tool_calls.clone();
-            final_delta.audio = choice.message.audio.clone();
-        } else if !emitted {
-            final_delta.role = Some(ChatRole::Assistant);
-        }
-
-        let final_chunk = chunk_from_delta(&plan.response, final_delta, finish);
+        let final_chunk =
+            chunk_from_delta(&plan.response, ChatCompletionChunkDelta::default(), finish);
         match encode(&final_chunk) {
             Ok(event) | Err(event) => yield Ok(event),
         }

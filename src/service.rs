@@ -350,6 +350,10 @@ fn build_stored_messages(
             id: format!("{}-{}", completion_id, index),
             role: message.role.clone(),
             content: message.content.clone(),
+            content_parts: message
+                .content
+                .as_ref()
+                .and_then(|content| content.parts().map(<[_]>::to_vec)),
             name: message.name.clone(),
             refusal: message.refusal.clone(),
             tool_calls: None,
@@ -361,6 +365,10 @@ fn build_stored_messages(
         id: format!("{}-{}", completion_id, stored.len()),
         role: ChatRole::Assistant,
         content: assistant.content.clone(),
+        content_parts: assistant
+            .content
+            .as_ref()
+            .and_then(|content| content.parts().map(<[_]>::to_vec)),
         name: None,
         refusal: assistant.refusal.clone(),
         tool_calls: assistant.tool_calls.clone(),
@@ -421,29 +429,8 @@ pub fn chunk_from_delta(
         model: response.model.clone(),
         choices: vec![choice],
         system_fingerprint: response.system_fingerprint.clone(),
+        service_tier: response.service_tier.clone(),
         usage: None,
-    }
-}
-
-pub fn delta_for_text(content: String, include_role: bool) -> ChatCompletionChunkDelta {
-    ChatCompletionChunkDelta {
-        role: include_role.then_some(ChatRole::Assistant),
-        content: Some(content),
-        function_call: None,
-        tool_calls: None,
-        refusal: None,
-        audio: None,
-    }
-}
-
-pub fn empty_delta() -> ChatCompletionChunkDelta {
-    ChatCompletionChunkDelta {
-        role: None,
-        content: None,
-        function_call: None,
-        tool_calls: None,
-        refusal: None,
-        audio: None,
     }
 }
 
@@ -455,6 +442,7 @@ pub fn usage_chunk(response: &ChatCompletionResponse) -> ChatCompletionChunk {
         model: response.model.clone(),
         choices: Vec::new(),
         system_fingerprint: response.system_fingerprint.clone(),
+        service_tier: response.service_tier.clone(),
         usage: Some(response.usage.clone()),
     }
 }
