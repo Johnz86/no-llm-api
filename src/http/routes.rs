@@ -19,6 +19,7 @@ use crate::config::{AuthSettings, ControlPlaneSettings, CorsSettings};
 use crate::http::auth;
 use crate::http::control::{self, RequestLog};
 use crate::http::error::{ApiError, not_found_fallback};
+use crate::http::metrics::Metrics;
 use crate::model::{ChatCompletionList, ChatCompletionMessageList, ChatCompletionRequest};
 use crate::models::ModelCatalogue;
 use crate::service::ChatService;
@@ -48,6 +49,7 @@ pub struct AppState {
     pub auth: AuthSettings,
     pub control_plane: ControlPlaneSettings,
     pub log: Arc<RequestLog>,
+    pub metrics: Arc<Metrics>,
 }
 
 /// Everything the router needs beyond the service itself.
@@ -58,6 +60,7 @@ pub struct RouterOptions {
     pub seed: u64,
     pub auth: AuthSettings,
     pub control_plane: ControlPlaneSettings,
+    pub metrics: bool,
 }
 
 impl Default for RouterOptions {
@@ -72,6 +75,7 @@ impl Default for RouterOptions {
                 enabled: true,
                 token: None,
             },
+            metrics: false,
         }
     }
 }
@@ -101,6 +105,7 @@ pub fn build_router_with_options(
         auth: options.auth,
         control_plane: options.control_plane,
         log: Arc::new(RequestLog::default()),
+        metrics: Arc::new(Metrics::default()),
     };
     let routes = Router::new()
         .route(
@@ -128,6 +133,13 @@ pub fn build_router_with_options(
         .with_state(state.clone());
 
     let mut app = root.merge(routes.clone()).nest("/v1", routes);
+    if options.metrics {
+        app = app.merge(
+            Router::new()
+                .route("/metrics", get(metrics_endpoint))
+                .with_state(state.clone()),
+        );
+    }
     if state.control_plane.enabled {
         app = app.merge(control::router(state.clone()));
     }
@@ -141,6 +153,7 @@ pub fn build_router_with_options(
         ))
         .layer(middleware::from_fn_with_state(state.clone(), log_request))
         .layer(middleware::from_fn(request_id_layer))
+        .layer(trace_layer())
         .layer(cors_layer(&options.cors));
 
     (app, state)
@@ -160,6 +173,7 @@ async fn log_request(
         .map(|(name, value)| control::redact(name.as_str(), value.to_str().unwrap_or("")))
         .collect();
     let response = next.run(request).await;
+    state.metrics.record_request(response.status().as_u16());
     state.log.record(control::LoggedRequest {
         method,
         path,
@@ -169,6 +183,23 @@ async fn log_request(
         headers,
     });
     response
+}
+
+/// Access logging at DEBUG. Only method, path, status and latency are recorded:
+/// headers can carry credentials, so they never reach a span.
+fn trace_layer() -> tower_http::trace::TraceLayer<
+    tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>,
+    fn(&axum::extract::Request) -> tracing::Span,
+> {
+    fn span(request: &axum::extract::Request) -> tracing::Span {
+        tracing::debug_span!(
+            "http",
+            method = %request.method(),
+            path = %request.uri().path(),
+        )
+    }
+
+    tower_http::trace::TraceLayer::new_for_http().make_span_with(span as fn(&_) -> _)
 }
 
 /// Mirrors origin and requested headers so no SDK header list can go stale.
@@ -355,8 +386,10 @@ async fn create_chat_completion(
     // An http_error fault answers before any streaming starts, the way a real
     // rate limit or outage does.
     if fault.kind == FaultKind::HttpError && fault_fires(&fault, plan_seed) {
+        state.metrics.record_fault();
         return Err(http_fault_error(&fault));
     }
+    state.metrics.record_completion(stream);
 
     if !stream {
         let mut response = Json(prepared.response.lean()).into_response();
@@ -389,6 +422,15 @@ async fn create_chat_completion(
     response_headers.insert(&ACCEL_BUFFERING, HeaderValue::from_static("no"));
     response_headers.insert(&SIMULATE_MATCH, match_kind);
     Ok(response)
+}
+
+/// Prometheus text exposition; only mounted when --metrics is set.
+async fn metrics_endpoint(State(state): State<AppState>) -> Response {
+    (
+        [(header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+        state.metrics.render(&state.cancels),
+    )
+        .into_response()
 }
 
 /// The pacing a catalogue entry declares, when it declares any.

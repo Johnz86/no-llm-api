@@ -241,6 +241,80 @@ async fn a_models_latency_profile_paces_it_when_the_scenario_is_neutral() {
 }
 
 #[tokio::test]
+async fn metrics_are_absent_unless_enabled_and_count_what_happened() {
+    let off = fixture(1000);
+    let (status, _, _) = send(off.app.clone(), "GET", "/metrics", None).await;
+    assert_eq!(status, 404, "metrics must be opt-in");
+
+    let on = fixture_with_options(
+        1000,
+        RouterOptions {
+            metrics: true,
+            ..RouterOptions::default()
+        },
+    );
+    let _ = send(
+        on.app.clone(),
+        "POST",
+        "/v1/chat/completions",
+        Some(body(PLAIN_PROMPT)),
+    )
+    .await;
+    let _ = send_with_headers(
+        on.app.clone(),
+        "POST",
+        "/v1/chat/completions",
+        Some(body(PLAIN_PROMPT)),
+        &[("x-simulate-fault", "http_error;status=503")],
+    )
+    .await;
+
+    let (status, headers, text) = send(on.app.clone(), "GET", "/metrics", None).await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        headers
+            .get("content-type")
+            .and_then(|value| value.to_str().ok()),
+        Some("text/plain; version=0.0.4")
+    );
+    assert!(text.contains("no_llm_api_completions_total 1"), "{text}");
+    assert!(
+        text.contains("no_llm_api_faults_injected_total 1"),
+        "{text}"
+    );
+    assert!(text.contains("no_llm_api_errors_total 1"), "{text}");
+    assert_eq!(
+        text.lines()
+            .filter(|line| line.starts_with("# TYPE"))
+            .count(),
+        6
+    );
+}
+
+#[tokio::test]
+async fn the_request_log_records_no_credentials_from_any_header() {
+    let fixture = fixture(1000);
+    let _ = send_with_headers(
+        fixture.app.clone(),
+        "GET",
+        "/v1/models",
+        None,
+        &[
+            ("authorization", "Bearer sk-leak-1"),
+            ("api-key", "sk-leak-2"),
+            ("cookie", "session=sk-leak-3"),
+            ("proxy-authorization", "Basic sk-leak-4"),
+        ],
+    )
+    .await;
+
+    let (_, _, text) = send(fixture.app.clone(), "GET", "/_mock/requests", None).await;
+    for leak in ["sk-leak-1", "sk-leak-2", "sk-leak-3", "sk-leak-4"] {
+        assert!(!text.contains(leak), "'{leak}' reached the log: {text}");
+    }
+}
+
+#[tokio::test]
 async fn the_control_plane_reports_and_replaces_the_live_scenario() {
     let fixture = fixture(1000);
 

@@ -106,6 +106,10 @@ pub struct Cli {
     #[arg(long, env = "LIVE_RECORD_PATH")]
     pub live_record_path: Option<PathBuf>,
 
+    /// Expose six Prometheus counters at GET /metrics.
+    #[arg(long, env = "NO_LLM_METRICS", default_value = "false", num_args = 0..=1, default_missing_value = "true")]
+    pub metrics: bool,
+
     /// Print the resolved configuration as JSON and exit.
     #[arg(long)]
     pub print_config: bool,
@@ -181,6 +185,7 @@ pub struct Settings {
     pub identity_mode: IdentityModeArg,
     pub auth: AuthSettings,
     pub control_plane: ControlPlaneSettings,
+    pub metrics: bool,
 }
 
 /// Describes how the service should source conversation data.
@@ -336,6 +341,7 @@ impl Settings {
                 forbidden_keys: cli.auth_forbidden_keys.clone(),
             },
             control_plane,
+            metrics: cli.metrics,
         })
     }
 

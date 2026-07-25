@@ -68,6 +68,7 @@ async fn main() -> Result<()> {
         seed: settings.seed,
         auth: settings.auth.clone(),
         control_plane: settings.control_plane.clone(),
+        metrics: settings.metrics,
     };
     let (app, _state) = build_router_with_options(service.clone(), options);
     let listener = TcpListener::bind(settings.bind_address).await?;

@@ -54,7 +54,7 @@ async-openai = { version = "0.41.1", features = [
 ], optional = true }
 clap = { version = "4.6.4", features = ["derive", "env"] }
 async-stream = "0.3.6"
-tower-http = { version = "0.7.0", features = ["cors"] }
+tower-http = { version = "0.7.0", features = ["cors", "trace"] }
 rand = "0.10.2"
 arc-swap = "1.9.2"
 serde_yaml_ng = "0.10.0"

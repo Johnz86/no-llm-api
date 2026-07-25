@@ -36,6 +36,7 @@ Every setting is a flag with an environment fallback. `no-llm-api --help` is the
 | `--control-token` | `NO_LLM_CONTROL_TOKEN` | Bearer token the control plane requires when set. | - |
 | `--live-record` | `LIVE_RECORD` | Persist live completions into a parquet file. | `false` |
 | `--live-record-path` | `LIVE_RECORD_PATH` | Output parquet when recording live sessions (falls back to `DATASET_PATH`). | - |
+| `--metrics` | `NO_LLM_METRICS` | Expose six Prometheus counters at `GET /metrics`. | `false` |
 | `--print-config` | - | Print the resolved configuration as JSON and exit. | - |
 
 ## Scenarios
