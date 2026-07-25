@@ -1,35 +1,39 @@
-use std::convert::Infallible;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::sse::Sse;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 
 use crate::model::{
     ChatCompletionList, ChatCompletionMessageList, ChatCompletionRequest, ChatCompletionResponse,
-    ChatRole, MessageContent,
 };
-use crate::service::{
-    ChatService, ServiceError, chunk_from_delta, delta_for_text, empty_delta, usage_chunk,
-};
+use crate::service::{ChatService, ServiceError};
+use crate::sim::stream::{CancelCounter, StreamPlan, sse_stream};
 use crate::store::{ListFilters, SortOrder};
 
 #[derive(Clone)]
 pub struct AppState {
     pub service: Arc<ChatService>,
+    pub cancels: Arc<CancelCounter>,
 }
 
 pub fn build_router(service: Arc<ChatService>) -> Router {
-    let state = AppState { service };
+    build_router_with_state(service).0
+}
+
+/// Builds the router and hands back the shared counters tests need to observe.
+pub fn build_router_with_state(service: Arc<ChatService>) -> (Router, Arc<CancelCounter>) {
+    let cancels = Arc::new(CancelCounter::default());
+    let state = AppState {
+        service,
+        cancels: cancels.clone(),
+    };
     let routes = Router::new()
         .route(
             "/chat/completions",
@@ -47,10 +51,12 @@ pub fn build_router(service: Arc<ChatService>) -> Router {
         )
         .with_state(state.clone());
 
-    Router::new()
+    let app = Router::new()
         .route("/", get(serve_index))
         .merge(routes.clone())
-        .nest("/v1", routes)
+        .nest("/v1", routes);
+
+    (app, cancels)
 }
 
 async fn serve_index() -> impl IntoResponse {
@@ -115,105 +121,13 @@ async fn create_chat_completion(
         return Json(prepared.response).into_response();
     }
 
-    let (sender, receiver) = mpsc::channel::<Result<Event, Infallible>>(32);
-    let response = prepared.response.clone();
-    let tokens = prepared.tokens;
-    let include_usage = prepared.include_usage_chunk;
-    let rate = state.service.tokens_per_second();
-    let tokenizer = state.service.tokenizer();
-    tokio::spawn(async move {
-        let delay = Duration::from_secs_f64(1.0 / rate.get() as f64);
-        let mut rendered = String::new();
-        let mut buffer: Vec<u32> = Vec::new();
-        let mut emitted = false;
+    let plan = StreamPlan::new(
+        prepared,
+        state.service.tokenizer().as_ref(),
+        state.service.tokens_per_second(),
+    );
 
-        for (index, token) in tokens.into_iter().enumerate() {
-            buffer.push(token);
-            let decoded = match tokenizer.decode(&buffer) {
-                Ok(text) => text,
-                Err(error) => {
-                    tracing::error!(target: "no_llm_api", ?error, "failed to decode token stream");
-                    return;
-                }
-            };
-            let delta = &decoded[rendered.len()..];
-            if !delta.is_empty() {
-                let chunk = chunk_from_delta(
-                    &response,
-                    delta_for_text(delta.to_string(), index == 0),
-                    None,
-                );
-                match Event::default().json_data(&chunk) {
-                    Ok(event) => {
-                        emitted = true;
-                        if sender.send(Ok(event)).await.is_err() {
-                            return;
-                        }
-                    }
-                    Err(error) => {
-                        tracing::error!(target: "no_llm_api", ?error, "failed to serialize chunk");
-                        return;
-                    }
-                }
-            }
-            rendered = decoded;
-            if !delay.is_zero() {
-                tokio::time::sleep(delay).await;
-            }
-        }
-
-        let choice = response.choices.first().cloned();
-        let mut final_delta = empty_delta();
-        if let Some(choice) = choice {
-            if !emitted {
-                final_delta.role = Some(ChatRole::Assistant);
-                if let Some(content) = choice.message.content.clone() {
-                    match content {
-                        MessageContent::Text(text) if !text.is_empty() => {
-                            final_delta.content = Some(text);
-                        }
-                        MessageContent::Parts(parts) => {
-                            let rendered_parts = MessageContent::Parts(parts).render().into_owned();
-                            if !rendered_parts.is_empty() {
-                                final_delta.content = Some(rendered_parts);
-                            }
-                        }
-                        MessageContent::Text(_) => {}
-                    }
-                }
-            }
-            final_delta.refusal = choice.message.refusal.clone();
-            final_delta.function_call = choice.message.function_call.clone();
-            final_delta.tool_calls = choice.message.tool_calls.clone();
-            final_delta.audio = choice.message.audio.clone();
-        } else if !emitted {
-            final_delta.role = Some(ChatRole::Assistant);
-        }
-
-        let finish = response
-            .choices
-            .first()
-            .and_then(|choice| choice.finish_reason.clone());
-        let final_chunk = chunk_from_delta(&response, final_delta, finish);
-        if let Ok(event) = Event::default().json_data(&final_chunk) {
-            let _ = sender.send(Ok(event)).await;
-        }
-        if include_usage {
-            let usage = usage_chunk(&response);
-            if let Ok(event) = Event::default().json_data(&usage) {
-                let _ = sender.send(Ok(event)).await;
-            }
-        }
-        let _ = sender.send(Ok(Event::default().data("[DONE]"))).await;
-    });
-
-    Sse::new(ReceiverStream::new(receiver))
-        .keep_alive(
-            KeepAlive::new()
-                .interval(Duration::from_secs(15))
-                .text("ping"),
-        )
-        .into_response()
+    Sse::new(sse_stream(plan, state.cancels.clone())).into_response()
 }
 
 async fn get_chat_completion(
