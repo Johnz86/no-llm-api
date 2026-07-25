@@ -485,6 +485,125 @@ async fn unknown_request_fields_do_not_break_the_call() {
 }
 
 #[tokio::test]
+async fn the_post_response_is_lean_and_the_stored_object_is_enriched() {
+    let fixture = fixture(1000);
+    let mut request = body(PLAIN_PROMPT);
+    request["store"] = json!(true);
+    request["temperature"] = json!(0.7);
+    request["user"] = json!("tester");
+    let (status, _, text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/chat/completions",
+        Some(request),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    let lean: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let keys: Vec<&String> = lean.as_object().unwrap().keys().collect();
+    for spec_field in ["id", "object", "created", "model", "choices", "usage"] {
+        assert!(
+            lean.get(spec_field).is_some(),
+            "missing {spec_field}: {text}"
+        );
+    }
+    for echo in [
+        "temperature",
+        "top_p",
+        "request_id",
+        "stop",
+        "stream_options",
+    ] {
+        assert!(
+            lean.get(echo).is_none(),
+            "the lean POST response must not echo '{echo}': {keys:?}"
+        );
+    }
+
+    let id = lean["id"].as_str().unwrap();
+    let (status, _, stored) = send(
+        fixture.app.clone(),
+        "GET",
+        &format!("/v1/chat/completions/{id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    let stored: serde_json::Value = serde_json::from_str(&stored).unwrap();
+    // The spec's own list example carries these, with explicit nulls.
+    for field in [
+        "request_id",
+        "tool_choice",
+        "seed",
+        "top_p",
+        "temperature",
+        "presence_penalty",
+        "frequency_penalty",
+        "system_fingerprint",
+        "input_user",
+        "service_tier",
+        "tools",
+        "metadata",
+        "response_format",
+    ] {
+        assert!(
+            stored.as_object().unwrap().contains_key(field),
+            "the stored object must carry '{field}': {stored}"
+        );
+    }
+    assert_eq!(stored["temperature"], 0.7);
+    assert_eq!(stored["input_user"], "tester");
+    assert!(stored["tool_choice"].is_null());
+}
+
+#[tokio::test]
+async fn out_of_range_parameters_answer_400_naming_the_parameter() {
+    let fixture = fixture(1000);
+    for (field, value, expected) in [
+        ("temperature", json!(2.5), "temperature"),
+        ("top_p", json!(-0.2), "top_p"),
+        ("frequency_penalty", json!(9), "frequency_penalty"),
+        ("presence_penalty", json!(-9), "presence_penalty"),
+        ("max_completion_tokens", json!(0), "max_completion_tokens"),
+        ("top_logprobs", json!(3), "top_logprobs"),
+    ] {
+        let mut request = body(PLAIN_PROMPT);
+        request[field] = value;
+        let (status, _, text) = send(
+            fixture.app.clone(),
+            "POST",
+            "/v1/chat/completions",
+            Some(request),
+        )
+        .await;
+        assert_eq!(status, 400, "{field} should have been rejected: {text}");
+        let envelope = assert_error_envelope(&text);
+        assert_eq!(envelope["error"]["param"], expected);
+    }
+}
+
+#[tokio::test]
+async fn valid_boundary_parameters_are_accepted() {
+    let fixture = fixture(1000);
+    let mut request = body(PLAIN_PROMPT);
+    request["temperature"] = json!(0);
+    request["top_p"] = json!(1);
+    request["frequency_penalty"] = json!(-2);
+    request["presence_penalty"] = json!(2);
+    request["logprobs"] = json!(true);
+    request["top_logprobs"] = json!(20);
+    let (status, _, text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/chat/completions",
+        Some(request),
+    )
+    .await;
+    assert_eq!(status, 200, "{text}");
+}
+
+#[tokio::test]
 async fn streamed_responses_disable_proxy_buffering() {
     use axum::body::Body;
     use axum::http::Request;

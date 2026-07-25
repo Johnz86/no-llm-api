@@ -113,8 +113,37 @@ async fn identity_fields_are_plan_derived_and_shaped_like_the_real_api() {
         13,
         "fp_ plus ten hex digits: {fingerprint}"
     );
-    assert!(value["request_id"].as_str().unwrap().starts_with("req_"));
+    assert!(
+        value.get("request_id").is_none(),
+        "request_id belongs to the stored object, not the lean POST response: {text}"
+    );
     assert!(value["created"].as_i64().unwrap() > 1_700_000_000);
+
+    // The stored object carries the derived request_id, as the spec's own list
+    // example does.
+    let mut stored_request = body(PLAIN_PROMPT);
+    stored_request["store"] = json!(true);
+    let (_, _, created) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/chat/completions",
+        Some(stored_request),
+    )
+    .await;
+    let stored_id = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (_, _, stored) = send(
+        fixture.app.clone(),
+        "GET",
+        &format!("/v1/chat/completions/{stored_id}"),
+        None,
+    )
+    .await;
+    let stored: serde_json::Value = serde_json::from_str(&stored).unwrap();
+    assert!(stored["request_id"].as_str().unwrap().starts_with("req_"));
+    assert_eq!(stored["id"], stored_id.as_str());
 }
 
 #[tokio::test]

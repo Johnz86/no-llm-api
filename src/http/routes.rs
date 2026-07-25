@@ -19,9 +19,7 @@ use crate::config::{AuthSettings, ControlPlaneSettings, CorsSettings};
 use crate::http::auth;
 use crate::http::control::{self, RequestLog};
 use crate::http::error::{ApiError, not_found_fallback};
-use crate::model::{
-    ChatCompletionList, ChatCompletionMessageList, ChatCompletionRequest, ChatCompletionResponse,
-};
+use crate::model::{ChatCompletionList, ChatCompletionMessageList, ChatCompletionRequest};
 use crate::models::ModelCatalogue;
 use crate::service::ChatService;
 use crate::sim::directive::Directive;
@@ -299,7 +297,7 @@ async fn list_chat_completions(
     let last_id = results
         .last()
         .map(|completion| completion.completion.id.clone());
-    let data: Vec<ChatCompletionResponse> = results
+    let data: Vec<crate::model::StoredChatCompletionView> = results
         .into_iter()
         .map(|item| item.to_list_item())
         .collect();
@@ -321,12 +319,7 @@ async fn create_chat_completion(
     body: Result<Json<ChatCompletionRequest>, axum::extract::rejection::JsonRejection>,
 ) -> Result<Response, ApiError> {
     let Json(request) = body?;
-    if request.messages.is_empty() {
-        return Err(ApiError::invalid_request(
-            "Invalid value for 'messages': expected a non-empty array.",
-        )
-        .with_param("messages"));
-    }
+    crate::http::validate::validate(&request)?;
 
     let scenario = state.scenario.load_full();
     let directive = Directive::from_headers(
@@ -355,7 +348,7 @@ async fn create_chat_completion(
     }
 
     if !stream {
-        let mut response = Json(prepared.response).into_response();
+        let mut response = Json(prepared.response.lean()).into_response();
         response.headers_mut().insert(&SIMULATE_MATCH, match_kind);
         return Ok(response);
     }
@@ -443,7 +436,7 @@ async fn get_chat_completion(
         .service
         .get(&completion_id)
         .await
-        .map(|record| Json(record.completion).into_response())
+        .map(|record| Json(record.completion.stored_view()).into_response())
         .ok_or_else(|| ApiError::not_found(&completion_id))
 }
 
@@ -462,7 +455,7 @@ async fn update_chat_completion(
         .service
         .update_metadata(&completion_id, body.metadata)
         .await
-        .map(|record| Json(record.completion).into_response())
+        .map(|record| Json(record.completion.stored_view()).into_response())
         .ok_or_else(|| ApiError::not_found(&completion_id))
 }
 

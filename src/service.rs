@@ -280,6 +280,8 @@ impl ChatService {
             logit_bias: request.logit_bias.clone(),
             stream_options: request.stream_options.clone(),
             audio: request.audio.clone(),
+            tools: request.tools.clone(),
+            input_user: request.user.clone(),
         };
 
         if store_enabled {

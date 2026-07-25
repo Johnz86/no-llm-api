@@ -180,8 +180,9 @@ pub struct StoredCompletion {
 }
 
 impl StoredCompletion {
-    pub fn to_list_item(&self) -> ChatCompletionResponse {
-        self.completion.clone()
+    /// The enriched object the list and retrieve routes return.
+    pub fn to_list_item(&self) -> crate::model::StoredChatCompletionView {
+        self.completion.stored_view()
     }
 }
 
@@ -235,6 +236,8 @@ mod tests {
             logit_bias: None,
             stream_options: None,
             audio: None,
+            tools: None,
+            input_user: None,
         }
     }
 

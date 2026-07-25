@@ -344,15 +344,103 @@ pub struct ChatCompletionResponse {
     pub stream_options: Option<ChatCompletionStreamOptions>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio: Option<Value>,
+    /// Stored-object members from the spec's list example; not part of the lean
+    /// `POST` response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_user: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatCompletionList {
     pub object: String,
-    pub data: Vec<ChatCompletionResponse>,
+    pub data: Vec<StoredChatCompletionView>,
     pub first_id: Option<String>,
     pub last_id: Option<String>,
     pub has_more: bool,
+}
+
+/// The lean object `POST /chat/completions` returns: exactly the members of
+/// `CreateChatCompletionResponse` (`openapi.yaml:33058`). Request echoes belong
+/// to the stored object, not to the completion that was just created.
+#[derive(Debug, Clone, Serialize)]
+pub struct LeanChatCompletionView {
+    pub id: String,
+    pub object: String,
+    pub created: i64,
+    pub model: String,
+    pub choices: Vec<ChatCompletionChoice>,
+    pub usage: ChatCompletionUsage,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_fingerprint: Option<String>,
+}
+
+/// The enriched object `GET`/`list` return, mirroring the spec's own
+/// `listChatCompletions` example (`openapi.yaml:2061-2092`): request parameters
+/// are present, with explicit nulls, because that is what clients read back.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredChatCompletionView {
+    pub object: String,
+    pub id: String,
+    pub model: String,
+    pub created: i64,
+    pub request_id: Option<String>,
+    pub tool_choice: Option<Value>,
+    pub usage: ChatCompletionUsage,
+    pub seed: Option<u64>,
+    pub top_p: Option<f32>,
+    pub temperature: Option<f32>,
+    pub presence_penalty: Option<f32>,
+    pub frequency_penalty: Option<f32>,
+    pub system_fingerprint: Option<String>,
+    pub input_user: Option<String>,
+    pub service_tier: Option<String>,
+    pub tools: Option<Vec<Value>>,
+    pub metadata: Option<Map<String, Value>>,
+    pub choices: Vec<ChatCompletionChoice>,
+    pub response_format: Option<Value>,
+}
+
+impl ChatCompletionResponse {
+    pub fn lean(&self) -> LeanChatCompletionView {
+        LeanChatCompletionView {
+            id: self.id.clone(),
+            object: self.object.clone(),
+            created: self.created,
+            model: self.model.clone(),
+            choices: self.choices.clone(),
+            usage: self.usage.clone(),
+            service_tier: self.service_tier.clone(),
+            system_fingerprint: self.system_fingerprint.clone(),
+        }
+    }
+
+    pub fn stored_view(&self) -> StoredChatCompletionView {
+        StoredChatCompletionView {
+            object: self.object.clone(),
+            id: self.id.clone(),
+            model: self.model.clone(),
+            created: self.created,
+            request_id: self.request_id.clone(),
+            tool_choice: self.tool_choice.clone(),
+            usage: self.usage.clone(),
+            seed: self.seed,
+            top_p: self.top_p,
+            temperature: self.temperature,
+            presence_penalty: self.presence_penalty,
+            frequency_penalty: self.frequency_penalty,
+            system_fingerprint: self.system_fingerprint.clone(),
+            input_user: self.input_user.clone(),
+            service_tier: self.service_tier.clone(),
+            tools: self.tools.clone(),
+            metadata: self.metadata.clone(),
+            choices: self.choices.clone(),
+            response_format: self.response_format.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
