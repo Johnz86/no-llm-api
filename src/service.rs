@@ -22,7 +22,7 @@ use thiserror::Error;
 enum ChatBackend {
     Dataset(ScriptIndex),
     #[cfg(feature = "live")]
-    Live(LiveBackend),
+    Live(Box<LiveBackend>),
 }
 
 #[derive(Debug, Error)]
@@ -75,7 +75,7 @@ impl ChatService {
         token_rate: NonZeroU32,
     ) -> Self {
         Self {
-            backend: ChatBackend::Live(backend),
+            backend: ChatBackend::Live(Box::new(backend)),
             token_rate,
             store: CompletionStore::new(),
             tokenizer,

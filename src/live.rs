@@ -10,13 +10,21 @@ use tiktoken_rs::CoreBPE;
 
 use crate::config::LiveSettings;
 use crate::dataset::{DatasetError, append_dataset_rows, rows_from_interaction};
+use crate::live_safety::{LiveCaps, redact_text};
 use crate::model::{ChatCompletionRequest, ChatCompletionResponse};
+use std::sync::atomic::{AtomicU64, Ordering};
+use tokio::sync::Semaphore;
 
 #[derive(Debug)]
 pub struct LiveBackend {
     client: LiveClient,
     record: bool,
     record_path: Option<PathBuf>,
+    caps: LiveCaps,
+    /// Bounds how many upstream calls can be in flight at once.
+    permits: Semaphore,
+    /// Bounds how many upstream calls one process can make at all.
+    spent: AtomicU64,
 }
 
 #[derive(Debug)]
@@ -41,15 +49,23 @@ pub enum LiveBackendError {
     Api(#[from] OpenAIError),
     #[error("dataset error: {0}")]
     Dataset(#[from] DatasetError),
+    #[error("live request budget of {0} requests for this process is exhausted")]
+    BudgetExhausted(u64),
+    #[error("live request timed out after {0}s")]
+    Timeout(u64),
 }
 
 impl LiveBackend {
     pub fn new(settings: &LiveSettings) -> Result<Self, LiveBackendError> {
         let client = build_client()?;
+        let caps = LiveCaps::default();
         Ok(Self {
             client,
             record: settings.record,
             record_path: settings.record_path.clone(),
+            permits: Semaphore::new(caps.max_concurrent_requests),
+            spent: AtomicU64::new(0),
+            caps,
         })
     }
 
@@ -58,13 +74,33 @@ impl LiveBackend {
         request: &ChatCompletionRequest,
         tokenizer: &CoreBPE,
     ) -> Result<LiveResult, LiveBackendError> {
+        let spent = self.spent.fetch_add(1, Ordering::Relaxed);
+        if spent >= self.caps.max_requests_per_session {
+            return Err(LiveBackendError::BudgetExhausted(
+                self.caps.max_requests_per_session,
+            ));
+        }
+        let _permit = self
+            .permits
+            .acquire()
+            .await
+            .expect("live permit semaphore closed");
+
         let mut openai_request = convert_request(request)?;
         openai_request.stream = Some(false);
 
-        let response = match &self.client {
-            LiveClient::OpenAI(client) => client.chat().create(openai_request).await?,
-            LiveClient::Azure(client) => client.chat().create(openai_request).await?,
+        let call = async {
+            match &self.client {
+                LiveClient::OpenAI(client) => client.chat().create(openai_request).await,
+                LiveClient::Azure(client) => client.chat().create(openai_request).await,
+            }
         };
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(self.caps.request_timeout_secs),
+            call,
+        )
+        .await
+        .map_err(|_| LiveBackendError::Timeout(self.caps.request_timeout_secs))??;
 
         let response = convert_response(response)?;
         let tokens = tokens_for_response(&response, tokenizer);
@@ -89,7 +125,23 @@ impl LiveBackend {
             return Ok(());
         }
 
-        let rows = rows_from_interaction(&response.id, &request.messages, response);
+        // One redaction pass before anything reaches disk: recorded output can
+        // quote a key that a user pasted into a prompt.
+        let mut rows = rows_from_interaction(&response.id, &request.messages, response);
+        for row in &mut rows {
+            if let Some(content) = row.content.as_ref() {
+                row.content = Some(std::borrow::Cow::Owned(redact_text(content)));
+            }
+            if let Some(parts) = row.content_parts.as_ref() {
+                row.content_parts = Some(std::borrow::Cow::Owned(redact_text(parts)));
+            }
+            if let Some(refusal) = row.refusal.as_ref() {
+                row.refusal = Some(std::borrow::Cow::Owned(redact_text(refusal)));
+            }
+            if let Some(tool_calls) = row.tool_calls.as_ref() {
+                row.tool_calls = Some(std::borrow::Cow::Owned(redact_text(tool_calls)));
+            }
+        }
         append_dataset_rows(path, &rows)?;
         Ok(())
     }

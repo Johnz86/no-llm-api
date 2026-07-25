@@ -11,4 +11,5 @@
 # Local scratch
 tmp_patch
 /data/live.parquet
+/data/live/
 /data/recordings.parquet

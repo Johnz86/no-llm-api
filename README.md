@@ -114,6 +114,12 @@ cargo run --features live --bin recorder -- --input recordings.json
 Without it, `DATASET_SOURCE=live` exits with an explanatory error rather than starting a server that
 cannot proxy.
 
+Live mode is bounded on purpose: 60 s per request, at most 4 concurrent upstream calls, and at most
+500 upstream calls per process. Credentials are wrapped so they cannot be logged or serialised, and
+recorded rows pass a redaction sweep before they reach parquet, because model output can quote a key
+a user pasted into a prompt. Recorded datasets are gitignored (`/data/live/`, `/data/live.parquet`,
+`/data/recordings.parquet`).
+
 ## Model catalogue and per-model behaviour
 
 `MODELS_PATH` accepts a bare array or `{ "data": [...] }`. Only the four spec fields reach a client;
