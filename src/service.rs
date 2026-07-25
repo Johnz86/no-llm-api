@@ -46,7 +46,8 @@ pub struct ChatService {
 
 pub struct PreparedCompletion {
     pub response: ChatCompletionResponse,
-    pub tokens: Vec<u32>,
+    /// One token sequence per choice; `n > 1` streams them interleaved.
+    pub token_sets: Vec<Vec<u32>>,
     pub include_usage_chunk: bool,
     pub match_kind: MatchKind,
 }
@@ -273,6 +274,47 @@ impl ChatService {
             logprobs: None,
         };
 
+        // `n > 1` asks for alternatives. They are derived from the plan digest, so
+        // the set is the same on every run, and each is a real fixture reply.
+        let mut choices = vec![choice];
+        let mut token_sets = vec![tokens];
+        let requested = request.n.unwrap_or(1).max(1) as usize;
+        for index in 1..requested {
+            let alternative = scripts.alternative(plan_digest, index);
+            let text = alternative.rendered_text.as_ref().to_string();
+            let (reasoning, visible) = crate::model::split_reasoning(&text);
+            let alternative_tokens = self.tokenizer.encode_with_special_tokens(&visible);
+            token_sets.push(alternative_tokens);
+            choices.push(ChatCompletionChoice {
+                index,
+                message: ChatCompletionResponseMessage {
+                    role: ChatRole::Assistant,
+                    content: (!visible.is_empty()).then_some(MessageContent::Text(visible)),
+                    refusal: alternative.refusal.clone(),
+                    reasoning_content: reasoning,
+                    tool_calls: alternative.tool_calls.clone(),
+                    function_call: alternative.function_call.clone(),
+                    audio: alternative.audio.clone(),
+                },
+                finish_reason: Some(
+                    alternative
+                        .finish_reason
+                        .clone()
+                        .unwrap_or(FinishReason::Stop),
+                ),
+                logprobs: None,
+            });
+        }
+
+        if requested > 1 {
+            let extra: u32 = token_sets[1..]
+                .iter()
+                .map(|tokens| tokens.len() as u32)
+                .sum();
+            usage.completion_tokens += extra;
+            usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
+        }
+
         let temperature = request.temperature.or(Some(1.0));
         let top_p = request.top_p.or(Some(1.0));
         let frequency_penalty = request.frequency_penalty.or(Some(0.0));
@@ -287,7 +329,7 @@ impl ChatService {
             created,
             model: request.model.clone(),
             usage,
-            choices: vec![choice],
+            choices,
             metadata: request.metadata.clone(),
             system_fingerprint: Some(identity.system_fingerprint.clone()),
             service_tier,
@@ -318,7 +360,7 @@ impl ChatService {
 
         Ok(PreparedCompletion {
             response,
-            tokens,
+            token_sets,
             include_usage_chunk,
             match_kind: selection.kind,
         })
@@ -354,7 +396,7 @@ impl ChatService {
 
         Ok(PreparedCompletion {
             response,
-            tokens: live.tokens,
+            token_sets: vec![live.tokens],
             include_usage_chunk,
             match_kind: MatchKind::Fallback,
         })
@@ -450,11 +492,12 @@ fn count_prompt_tokens(messages: &[ChatCompletionRequestMessage], tokenizer: &Co
 
 pub fn chunk_from_delta(
     response: &ChatCompletionResponse,
+    index: usize,
     delta: ChatCompletionChunkDelta,
     finish: Option<FinishReason>,
 ) -> ChatCompletionChunk {
     let choice = ChatCompletionChunkChoice {
-        index: 0,
+        index,
         delta,
         finish_reason: finish.clone(),
         logprobs: None,
@@ -523,7 +566,7 @@ mod tests {
 
         let request = request_with_text("hello");
         let result = service.create_completion(request.clone()).await.unwrap();
-        assert!(!result.tokens.is_empty());
+        assert!(!result.token_sets[0].is_empty());
         let stored = service
             .list(SortOrder::Ascending, None, 10, ListFilters::default())
             .await;
@@ -575,7 +618,7 @@ mod tests {
         let result = service.create_completion(request).await.unwrap();
         assert!(result.response.usage.completion_tokens <= 5);
         assert_eq!(
-            result.tokens.len() as u32,
+            result.token_sets[0].len() as u32,
             result.response.usage.completion_tokens
         );
         assert_eq!(

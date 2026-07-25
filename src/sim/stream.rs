@@ -18,8 +18,7 @@ use tiktoken_rs::CoreBPE;
 
 use crate::model::{
     ChatCompletionChunk, ChatCompletionChunkDelta, ChatCompletionMessageToolCall,
-    ChatCompletionMessageToolCallChunk, ChatCompletionResponse, ChatRole, FinishReason,
-    FunctionCallChunk,
+    ChatCompletionMessageToolCallChunk, ChatCompletionResponse, ChatRole, FunctionCallChunk,
 };
 use crate::service::{PreparedCompletion, chunk_from_delta, usage_chunk};
 use crate::sim::scenario::{Fault, FaultKind, Timing};
@@ -46,7 +45,9 @@ impl CancelCounter {
 /// only has to obey them.
 pub struct StreamPlan {
     pub response: ChatCompletionResponse,
-    pub frames: Vec<ChatCompletionChunkDelta>,
+    /// Ordered `(choice index, delta)` pairs. With `n > 1` the per-choice
+    /// sequences are interleaved, the way the API emits them.
+    pub frames: Vec<(usize, ChatCompletionChunkDelta)>,
     pub include_usage: bool,
     pub gap: Duration,
     pub ttft: Duration,
@@ -78,19 +79,27 @@ impl StreamPlan {
         fault: &Fault,
         seed: u64,
     ) -> Self {
-        let pieces = token_pieces(tokenizer, &prepared.tokens);
-        let pieces = match timing.chunk_tokens {
-            Some(size) if size > 1 => group_pieces(&pieces, size as usize),
-            _ => pieces,
-        };
-        let frames = build_frames(&prepared.response, &pieces, tokenizer);
+        let per_choice: Vec<Vec<ChatCompletionChunkDelta>> = prepared
+            .token_sets
+            .iter()
+            .enumerate()
+            .map(|(index, tokens)| {
+                let pieces = token_pieces(tokenizer, tokens);
+                let pieces = match timing.chunk_tokens {
+                    Some(size) if size > 1 => group_pieces(&pieces, size as usize),
+                    _ => pieces,
+                };
+                build_frames(&prepared.response, index, &pieces, tokenizer)
+            })
+            .collect();
+
         let effective_rate = timing
             .tokens_per_second
             .and_then(NonZeroU32::new)
             .unwrap_or(rate);
         Self {
             response: prepared.response,
-            frames,
+            frames: interleave(per_choice),
             include_usage: prepared.include_usage_chunk,
             gap: Duration::from_secs_f64(1.0 / f64::from(effective_rate.get())),
             ttft: Duration::from_millis(timing.ttft_ms),
@@ -99,13 +108,6 @@ impl StreamPlan {
             fault: fault.clone(),
             seed,
         }
-    }
-
-    fn finish_reason(&self) -> Option<FinishReason> {
-        self.response
-            .choices
-            .first()
-            .and_then(|choice| choice.finish_reason.clone())
     }
 
     /// Whether keep-alive comments should be sent for this plan.
@@ -117,15 +119,33 @@ impl StreamPlan {
     }
 }
 
+/// Round-robins the per-choice sequences so no choice finishes before another
+/// starts, which is what a client assembling `n` alternatives expects to see.
+fn interleave(
+    per_choice: Vec<Vec<ChatCompletionChunkDelta>>,
+) -> Vec<(usize, ChatCompletionChunkDelta)> {
+    let rounds = per_choice.iter().map(Vec::len).max().unwrap_or(0);
+    let mut frames = Vec::with_capacity(rounds * per_choice.len());
+    for round in 0..rounds {
+        for (index, sequence) in per_choice.iter().enumerate() {
+            if let Some(delta) = sequence.get(round) {
+                frames.push((index, delta.clone()));
+            }
+        }
+    }
+    frames
+}
+
 /// Groups token pieces into larger frames, for clients being tested against
 /// providers that batch tokens.
 fn group_pieces(pieces: &[String], size: usize) -> Vec<String> {
     pieces.chunks(size).map(|chunk| chunk.concat()).collect()
 }
 
-/// Builds the ordered delta sequence for one completion.
+/// Builds the ordered delta sequence for one choice.
 fn build_frames(
     response: &ChatCompletionResponse,
+    choice_index: usize,
     pieces: &[String],
     tokenizer: &CoreBPE,
 ) -> Vec<ChatCompletionChunkDelta> {
@@ -135,7 +155,7 @@ fn build_frames(
         ..Default::default()
     }];
 
-    let choice = response.choices.first();
+    let choice = response.choices.get(choice_index);
 
     // Reasoning arrives before visible content, which is the order the GUIs that
     // render a thinking pane expect.
@@ -343,7 +363,6 @@ pub fn sse_stream(
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     async_stream::stream! {
         let mut guard = CancelGuard { cancels, done: false };
-        let finish = plan.finish_reason();
         let mut rng = StdRng::seed_from_u64(plan.seed);
         let fires = plan.fault.kind != FaultKind::None
             && (plan.fault.rate >= 1.0 || rng.random::<f64>() < plan.fault.rate);
@@ -353,7 +372,7 @@ pub fn sse_stream(
             tokio::time::sleep(plan.ttft).await;
         }
 
-        for (index, delta) in plan.frames.iter().enumerate() {
+        for (index, (choice_index, delta)) in plan.frames.iter().enumerate() {
             if fires && index == trigger_at {
                 match plan.fault.kind {
                     FaultKind::Drop => {
@@ -396,7 +415,7 @@ pub fn sse_stream(
                 }
             }
 
-            let chunk = chunk_from_delta(&plan.response, delta.clone(), None);
+            let chunk = chunk_from_delta(&plan.response, *choice_index, delta.clone(), None);
             match encode(&chunk) {
                 Ok(event) => yield Ok(event),
                 Err(event) => {
@@ -408,10 +427,17 @@ pub fn sse_stream(
             }
         }
 
-        let final_chunk =
-            chunk_from_delta(&plan.response, ChatCompletionChunkDelta::default(), finish);
-        match encode(&final_chunk) {
-            Ok(event) | Err(event) => yield Ok(event),
+        // One terminal frame per choice, each carrying its own finish_reason.
+        for (choice_index, choice) in plan.response.choices.iter().enumerate() {
+            let final_chunk = chunk_from_delta(
+                &plan.response,
+                choice_index,
+                ChatCompletionChunkDelta::default(),
+                choice.finish_reason.clone(),
+            );
+            match encode(&final_chunk) {
+                Ok(event) | Err(event) => yield Ok(event),
+            }
         }
 
         if plan.include_usage {

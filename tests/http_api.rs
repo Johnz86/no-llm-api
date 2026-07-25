@@ -716,6 +716,57 @@ async fn role_specific_message_requirements_are_enforced() {
 }
 
 #[tokio::test]
+async fn n_greater_than_one_returns_indexed_alternatives() {
+    let fixture = fixture(1000);
+    let mut request = body(PLAIN_PROMPT);
+    request["n"] = json!(3);
+    let (status, _, text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/chat/completions",
+        Some(request),
+    )
+    .await;
+    assert_eq!(status, 200, "{text}");
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let choices = value["choices"].as_array().unwrap();
+    assert_eq!(choices.len(), 3);
+    for (position, choice) in choices.iter().enumerate() {
+        assert_eq!(choice["index"], position as u64);
+        assert!(!choice["finish_reason"].is_null());
+        assert_eq!(choice["message"]["role"], "assistant");
+    }
+    let total: u64 = value["usage"]["completion_tokens"].as_u64().unwrap();
+    assert!(
+        total > 0,
+        "usage must account for every choice: {}",
+        value["usage"]
+    );
+}
+
+#[tokio::test]
+async fn alternatives_are_the_same_on_every_run() {
+    let fixture = fixture(1000);
+    let mut request = body(PLAIN_PROMPT);
+    request["n"] = json!(4);
+    let (_, _, first) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/chat/completions",
+        Some(request.clone()),
+    )
+    .await;
+    let (_, _, second) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/chat/completions",
+        Some(request),
+    )
+    .await;
+    assert_eq!(first, second);
+}
+
+#[tokio::test]
 async fn streamed_responses_disable_proxy_buffering() {
     use axum::body::Body;
     use axum::http::Request;

@@ -375,6 +375,61 @@ async fn reasoning_streams_before_content() {
 }
 
 #[tokio::test]
+async fn multiple_choices_stream_interleaved_with_one_terminal_frame_each() {
+    let fixture = fixture(1000);
+    let mut request = stream_body(PLAIN_PROMPT);
+    request["n"] = serde_json::json!(2);
+    let transcript = collect_sse(fixture.app.clone(), request).await;
+
+    let chunks = transcript.chunks();
+    assert_eq!(
+        transcript.frames.last().map(|frame| frame.data.as_str()),
+        Some("[DONE]")
+    );
+
+    let mut per_choice_content = std::collections::BTreeMap::<u64, String>::new();
+    let mut finishes = std::collections::BTreeMap::<u64, usize>::new();
+    for chunk in &chunks {
+        let Some(choice) = chunk["choices"].get(0) else {
+            continue;
+        };
+        let index = choice["index"].as_u64().expect("every choice has an index");
+        if let Some(text) = choice["delta"]["content"].as_str() {
+            per_choice_content.entry(index).or_default().push_str(text);
+        }
+        if !choice["finish_reason"].is_null() {
+            *finishes.entry(index).or_default() += 1;
+        }
+    }
+
+    assert_eq!(
+        per_choice_content.len(),
+        2,
+        "both choices must stream content: {per_choice_content:?}"
+    );
+    assert_eq!(
+        finishes.values().copied().collect::<Vec<_>>(),
+        vec![1, 1],
+        "each choice ends exactly once: {finishes:?}"
+    );
+    assert_eq!(per_choice_content[&0], PLAIN_REPLY);
+
+    // Interleaving: choice 1 must start before choice 0 finishes.
+    let first_choice_one = chunks
+        .iter()
+        .position(|chunk| chunk["choices"][0]["index"] == 1)
+        .expect("choice 1 never appeared");
+    let last_choice_zero = chunks
+        .iter()
+        .rposition(|chunk| chunk["choices"][0]["index"] == 0)
+        .expect("choice 0 never appeared");
+    assert!(
+        first_choice_one < last_choice_zero,
+        "choices must interleave: {first_choice_one} vs {last_choice_zero}"
+    );
+}
+
+#[tokio::test]
 async fn dropping_the_stream_cancels_the_simulation() {
     use axum::body::Body;
     use axum::http::Request;

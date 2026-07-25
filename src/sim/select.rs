@@ -253,6 +253,15 @@ impl ScriptIndex {
             .map(|(script, reply)| self.selection(*script, *reply, MatchKind::LastUser))
     }
 
+    /// A deterministic alternative reply for `n > 1`, mixed with the choice index
+    /// so each alternative differs while staying reproducible.
+    pub fn alternative(&self, digest: u64, choice_index: usize) -> AssistantMessage {
+        let mixed = digest ^ ((choice_index as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+        let script = &self.scripts[pick(mixed, self.scripts.len().max(1))];
+        let reply = pick(mixed >> 32, script.assistants().len().max(1));
+        script.assistants()[reply].clone()
+    }
+
     /// Level 4: derive a fixture from the request digest, so off-script prompts
     /// still answer the same way every time.
     fn fallback(&self, key: &SelectionKey) -> Selection {
