@@ -197,6 +197,14 @@ pub struct ConversationScript {
 }
 
 impl ConversationScript {
+    pub fn turns(&self) -> &[ConversationTurn] {
+        &self.turns
+    }
+
+    pub fn assistants(&self) -> &[AssistantMessage] {
+        &self.assistants
+    }
+
     pub fn assistant_at(&self, index: usize) -> AssistantMessage {
         let idx = index % self.assistants.len();
         self.assistants[idx].clone()
@@ -240,6 +248,10 @@ pub struct ConversationTurn {
 }
 
 impl ConversationTurn {
+    pub fn assistant_slot(&self) -> Option<usize> {
+        self.assistant_index
+    }
+
     fn assistant_index(&self) -> Option<usize> {
         self.assistant_index
     }
@@ -546,7 +558,14 @@ pub fn ensure_sample_dataset(path: &Path) -> Result<PathBuf, DatasetError> {
     if path.exists() {
         return Ok(path.to_path_buf());
     }
+    write_sample_dataset(path)
+}
 
+/// Writes the bundled sample dataset, replacing whatever is there.
+///
+/// `ensure_sample_dataset` returns early when the file exists, which is why
+/// regeneration needs its own entry point instead of silently doing nothing.
+pub fn write_sample_dataset(path: &Path) -> Result<PathBuf, DatasetError> {
     if let Some(parent) = path.parent()
         && !parent.exists()
     {
@@ -554,6 +573,12 @@ pub fn ensure_sample_dataset(path: &Path) -> Result<PathBuf, DatasetError> {
     }
 
     write_dataset(path, &sample_rows())
+}
+
+/// The bundled fixture rows, exposed so a test can detect drift between the
+/// tracked parquet file and the source of truth in this module.
+pub fn bundled_rows() -> Vec<DatasetRow<'static>> {
+    sample_rows()
 }
 
 fn role_as_str(role: &ChatRole) -> &'static str {

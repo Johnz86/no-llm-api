@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: pretty(&text)
+---
+{
+  "error": {
+    "code": "model_not_found",
+    "message": "The model 'nope' does not exist or you do not have access to it.",
+    "param": "model",
+    "type": "invalid_request_error"
+  }
+}

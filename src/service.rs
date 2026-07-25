@@ -1,13 +1,10 @@
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value};
 use tiktoken_rs::CoreBPE;
-use uuid::Uuid;
 
-use crate::dataset::{AssistantMessage, ConversationScript, ConversationScripts};
+use crate::dataset::ConversationScripts;
 use crate::live::{LiveBackend, LiveBackendError};
 use crate::model::{
     ChatCompletionChoice, ChatCompletionChunk, ChatCompletionChunkChoice, ChatCompletionChunkDelta,
@@ -15,37 +12,15 @@ use crate::model::{
     ChatCompletionResponseMessage, ChatCompletionUsage, ChatRole, FinishReason, MessageContent,
     StoredMessage,
 };
+use crate::sim::digest::Digest;
+use crate::sim::identity::{Clock, Identity, IdentityMode, SystemClock};
+use crate::sim::select::{MatchKind, ScriptIndex, SelectionKey};
 use crate::store::{CompletionStore, ListFilters, SortOrder, StoredCompletion};
 use thiserror::Error;
 
 enum ChatBackend {
-    Dataset(DatasetBackend),
+    Dataset(ScriptIndex),
     Live(LiveBackend),
-}
-
-struct DatasetBackend {
-    scripts: Arc<[ConversationScript]>,
-    cursors: Vec<AtomicUsize>,
-    rotation: AtomicUsize,
-}
-
-impl DatasetBackend {
-    fn match_assistant_response(
-        &self,
-        request: &ChatCompletionRequest,
-    ) -> Option<AssistantMessage> {
-        let user_message = last_user_message(&request.messages)?;
-        self.scripts
-            .iter()
-            .find_map(|script| script.response_for_user(&user_message))
-    }
-
-    fn next_assistant(&self) -> AssistantMessage {
-        let script_index = self.rotation.fetch_add(1, Ordering::Relaxed) % self.scripts.len();
-        let script = &self.scripts[script_index];
-        let turn_index = self.cursors[script_index].fetch_add(1, Ordering::Relaxed);
-        script.assistant_at(turn_index)
-    }
 }
 
 #[derive(Debug, Error)]
@@ -61,12 +36,15 @@ pub struct ChatService {
     token_rate: NonZeroU32,
     store: CompletionStore,
     tokenizer: Arc<CoreBPE>,
+    identity_mode: IdentityMode,
+    clock: Arc<dyn Clock>,
 }
 
 pub struct PreparedCompletion {
     pub response: ChatCompletionResponse,
     pub tokens: Vec<u32>,
     pub include_usage_chunk: bool,
+    pub match_kind: MatchKind,
 }
 
 impl ChatService {
@@ -75,18 +53,13 @@ impl ChatService {
         tokenizer: Arc<CoreBPE>,
         token_rate: NonZeroU32,
     ) -> Self {
-        let shared = scripts.share();
-        let cursors = shared.iter().map(|_| AtomicUsize::new(0)).collect();
-        let backend = ChatBackend::Dataset(DatasetBackend {
-            scripts: shared,
-            cursors,
-            rotation: AtomicUsize::new(0),
-        });
         Self {
-            backend,
+            backend: ChatBackend::Dataset(ScriptIndex::build(scripts.share())),
             token_rate,
             store: CompletionStore::new(),
             tokenizer,
+            identity_mode: IdentityMode::default(),
+            clock: Arc::new(SystemClock),
         }
     }
 
@@ -100,7 +73,20 @@ impl ChatService {
             token_rate,
             store: CompletionStore::new(),
             tokenizer,
+            identity_mode: IdentityMode::default(),
+            clock: Arc::new(SystemClock),
         }
+    }
+
+    /// Overrides where `created` comes from; ids stay plan-derived either way.
+    pub fn with_identity_mode(mut self, mode: IdentityMode) -> Self {
+        self.identity_mode = mode;
+        self
+    }
+
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     pub fn tokens_per_second(&self) -> NonZeroU32 {
@@ -123,7 +109,7 @@ impl ChatService {
 
     async fn create_completion_dataset(
         &self,
-        dataset: &DatasetBackend,
+        scripts: &ScriptIndex,
         request: ChatCompletionRequest,
     ) -> Result<PreparedCompletion, ServiceError> {
         let store_enabled = request.store.unwrap_or(false);
@@ -133,10 +119,9 @@ impl ChatService {
             .map(|options| options.include_usage)
             .unwrap_or(false);
 
-        let assistant = match dataset.match_assistant_response(&request) {
-            Some(message) => message,
-            None => dataset.next_assistant(),
-        };
+        let key = SelectionKey::from_request(&request);
+        let selection = scripts.select(&key);
+        let assistant = selection.message;
 
         let mut tokens: Vec<u32> = assistant.tokens.iter().copied().collect();
         let mut assistant_text = assistant.rendered_text.as_ref().to_string();
@@ -185,9 +170,23 @@ impl ChatService {
             usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
         }
 
-        let created = unix_timestamp();
-        let identifier = format!("chatcmpl-{}", Uuid::new_v4());
-        let request_id = format!("req_{}", Uuid::new_v4().as_simple());
+        let plan_digest = {
+            let mut digest = Digest::new();
+            digest.field(&key.digest().to_le_bytes());
+            digest.field(selection.script_id.as_bytes());
+            digest.field(assistant.rendered_text.as_bytes());
+            digest.field(&(tokens.len() as u64).to_le_bytes());
+            // Metadata does not steer fixture selection, but it is echoed back, so
+            // two requests that differ only in metadata are different responses.
+            if let Some(metadata) = &request.metadata {
+                digest.field(Value::Object(metadata.clone()).to_string().as_bytes());
+            }
+            digest.finish()
+        };
+        let identity = Identity::derive(plan_digest, self.identity_mode, self.clock.as_ref());
+        let created = identity.created;
+        let identifier = identity.id.clone();
+        let request_id = identity.request_id.clone();
 
         let message_content = if truncated {
             if assistant_text.is_empty() {
@@ -236,7 +235,7 @@ impl ChatService {
             usage,
             choices: vec![choice],
             metadata: request.metadata.clone(),
-            system_fingerprint: Some("fp_mock".to_string()),
+            system_fingerprint: Some(identity.system_fingerprint.clone()),
             service_tier,
             request_id: Some(request_id),
             temperature,
@@ -265,6 +264,7 @@ impl ChatService {
             response,
             tokens,
             include_usage_chunk,
+            match_kind: selection.kind,
         })
     }
 
@@ -299,6 +299,7 @@ impl ChatService {
             response,
             tokens: live.tokens,
             include_usage_chunk,
+            match_kind: MatchKind::Fallback,
         })
     }
 
@@ -388,26 +389,6 @@ fn count_prompt_tokens(messages: &[ChatCompletionRequestMessage], tokenizer: &Co
             None => 0,
         })
         .sum()
-}
-
-fn unix_timestamp() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
-}
-
-fn last_user_message(messages: &[ChatCompletionRequestMessage]) -> Option<String> {
-    messages.iter().rev().find_map(|message| {
-        if matches!(message.role, ChatRole::User) {
-            message
-                .content
-                .as_ref()
-                .map(|content| content.render().into_owned())
-        } else {
-            None
-        }
-    })
 }
 
 pub fn chunk_from_delta(

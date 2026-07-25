@@ -29,6 +29,8 @@ const INDEX_HTML: &str = include_str!("../../index.html");
 
 const REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
 const ACCEL_BUFFERING: HeaderName = HeaderName::from_static("x-accel-buffering");
+/// Which rung of the matching ladder produced the reply; for test triage only.
+const SIMULATE_MATCH: HeaderName = HeaderName::from_static("x-simulate-match");
 
 #[derive(Clone)]
 pub struct AppState {
@@ -225,8 +227,11 @@ async fn create_chat_completion(
     }
     let stream = request.stream;
     let prepared = state.service.create_completion(request).await?;
+    let match_kind = HeaderValue::from_static(prepared.match_kind.as_str());
     if !stream {
-        return Ok(Json(prepared.response).into_response());
+        let mut response = Json(prepared.response).into_response();
+        response.headers_mut().insert(&SIMULATE_MATCH, match_kind);
+        return Ok(response);
     }
 
     let plan = StreamPlan::new(
@@ -236,9 +241,9 @@ async fn create_chat_completion(
     );
 
     let mut response = Sse::new(sse_stream(plan, state.cancels.clone())).into_response();
-    response
-        .headers_mut()
-        .insert(&ACCEL_BUFFERING, HeaderValue::from_static("no"));
+    let headers = response.headers_mut();
+    headers.insert(&ACCEL_BUFFERING, HeaderValue::from_static("no"));
+    headers.insert(&SIMULATE_MATCH, match_kind);
     Ok(response)
 }
 
