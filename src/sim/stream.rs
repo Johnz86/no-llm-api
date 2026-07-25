@@ -12,6 +12,8 @@ use std::time::Duration;
 
 use axum::response::sse::Event;
 use futures::Stream;
+use rand::rngs::StdRng;
+use rand::{RngExt, SeedableRng};
 use tiktoken_rs::CoreBPE;
 
 use crate::model::{
@@ -20,6 +22,7 @@ use crate::model::{
     FunctionCallChunk,
 };
 use crate::service::{PreparedCompletion, chunk_from_delta, usage_chunk};
+use crate::sim::scenario::{Fault, FaultKind, Timing};
 
 /// Counts streams abandoned by the consumer before the terminal frame.
 #[derive(Debug, Default)]
@@ -39,23 +42,62 @@ impl CancelCounter {
 ///
 /// The frame list is the whole simulation: a role-only opener, content-only
 /// middles, refusal or tool-call fragments, and a terminal `delta: {}` carrying
-/// `finish_reason`. Timing is the only thing left to do at stream time.
+/// `finish_reason`. Timing and faults are resolved here too, so the generator
+/// only has to obey them.
 pub struct StreamPlan {
     pub response: ChatCompletionResponse,
     pub frames: Vec<ChatCompletionChunkDelta>,
     pub include_usage: bool,
     pub gap: Duration,
+    pub ttft: Duration,
+    pub jitter_ms: u64,
+    pub burst_frames: u32,
+    pub fault: Fault,
+    /// Seed for jitter and fault probability; derived, so pacing is reproducible.
+    pub seed: u64,
 }
 
 impl StreamPlan {
+    /// A plan with no scenario applied: the server-wide token rate only.
     pub fn new(prepared: PreparedCompletion, tokenizer: &CoreBPE, rate: NonZeroU32) -> Self {
+        Self::with_profile(
+            prepared,
+            tokenizer,
+            rate,
+            &Timing::default(),
+            &Fault::default(),
+            0,
+        )
+    }
+
+    pub fn with_profile(
+        prepared: PreparedCompletion,
+        tokenizer: &CoreBPE,
+        rate: NonZeroU32,
+        timing: &Timing,
+        fault: &Fault,
+        seed: u64,
+    ) -> Self {
         let pieces = token_pieces(tokenizer, &prepared.tokens);
+        let pieces = match timing.chunk_tokens {
+            Some(size) if size > 1 => group_pieces(&pieces, size as usize),
+            _ => pieces,
+        };
         let frames = build_frames(&prepared.response, &pieces, tokenizer);
+        let effective_rate = timing
+            .tokens_per_second
+            .and_then(NonZeroU32::new)
+            .unwrap_or(rate);
         Self {
             response: prepared.response,
             frames,
             include_usage: prepared.include_usage_chunk,
-            gap: Duration::from_secs_f64(1.0 / f64::from(rate.get())),
+            gap: Duration::from_secs_f64(1.0 / f64::from(effective_rate.get())),
+            ttft: Duration::from_millis(timing.ttft_ms),
+            jitter_ms: timing.jitter_ms,
+            burst_frames: timing.burst_frames,
+            fault: fault.clone(),
+            seed,
         }
     }
 
@@ -65,6 +107,20 @@ impl StreamPlan {
             .first()
             .and_then(|choice| choice.finish_reason.clone())
     }
+
+    /// Whether keep-alive comments should be sent for this plan.
+    ///
+    /// Decision D6: off for fidelity with real traffic, on during a stall so the
+    /// fault is actually reachable by a client that relies on them.
+    pub fn keep_alive(&self) -> bool {
+        self.fault.kind == FaultKind::Stall
+    }
+}
+
+/// Groups token pieces into larger frames, for clients being tested against
+/// providers that batch tokens.
+fn group_pieces(pieces: &[String], size: usize) -> Vec<String> {
+    pieces.chunks(size).map(|chunk| chunk.concat()).collect()
 }
 
 /// Builds the ordered delta sequence for one completion.
@@ -264,7 +320,8 @@ fn drain_complete(pending: &mut Vec<u8>) -> String {
     }
 }
 
-/// Renders the plan as SSE frames, guaranteeing a terminal `[DONE]` on every path.
+/// Renders the plan as SSE frames, guaranteeing a terminal `[DONE]` on every path
+/// except the deliberate `drop` fault.
 pub fn sse_stream(
     plan: StreamPlan,
     cancels: Arc<CancelCounter>,
@@ -272,11 +329,58 @@ pub fn sse_stream(
     async_stream::stream! {
         let mut guard = CancelGuard { cancels, done: false };
         let finish = plan.finish_reason();
+        let mut rng = StdRng::seed_from_u64(plan.seed);
+        let fires = plan.fault.kind != FaultKind::None
+            && (plan.fault.rate >= 1.0 || rng.random::<f64>() < plan.fault.rate);
+        let trigger_at = plan.fault.after_frames.unwrap_or(2) as usize;
+
+        if !plan.ttft.is_zero() {
+            tokio::time::sleep(plan.ttft).await;
+        }
 
         for (index, delta) in plan.frames.iter().enumerate() {
-            if index > 0 && !plan.gap.is_zero() {
-                tokio::time::sleep(plan.gap).await;
+            if fires && index == trigger_at {
+                match plan.fault.kind {
+                    FaultKind::Drop => {
+                        // Deliberate truncation: no terminal frame, no [DONE].
+                        guard.done = true;
+                        return;
+                    }
+                    FaultKind::SseError => {
+                        yield Ok(error_event(
+                            "The server had an error while processing your request.",
+                            "server_error",
+                        ));
+                        yield Ok(done_event());
+                        guard.done = true;
+                        return;
+                    }
+                    FaultKind::Stall => {
+                        tokio::time::sleep(Duration::from_millis(
+                            plan.fault.after_ms.unwrap_or(30_000),
+                        ))
+                        .await;
+                    }
+                    _ => {}
+                }
             }
+
+            if index > 0 {
+                let bursting = (index as u32) < plan.burst_frames;
+                if !bursting {
+                    let mut gap = plan.gap;
+                    if fires && plan.fault.kind == FaultKind::SlowThenRecover && index < trigger_at {
+                        gap *= 5;
+                    }
+                    if plan.jitter_ms > 0 {
+                        gap += Duration::from_millis(rng.random_range(0..=plan.jitter_ms));
+                    }
+                    if !gap.is_zero() {
+                        tokio::time::sleep(gap).await;
+                    }
+                }
+            }
+
             let chunk = chunk_from_delta(&plan.response, delta.clone(), None);
             match encode(&chunk) {
                 Ok(event) => yield Ok(event),
@@ -305,6 +409,21 @@ pub fn sse_stream(
         yield Ok(done_event());
         guard.done = true;
     }
+}
+
+/// A spec-shaped error delivered inside the stream, the way the API does it.
+fn error_event(message: &str, kind: &str) -> Event {
+    Event::default().data(
+        serde_json::json!({
+            "error": {
+                "message": message,
+                "type": kind,
+                "param": serde_json::Value::Null,
+                "code": serde_json::Value::Null,
+            }
+        })
+        .to_string(),
+    )
 }
 
 /// Serialises a chunk, falling back to a spec-shaped error frame.

@@ -1,0 +1,10 @@
+name: realistic
+description: "Approximates a hosted model: a short think, then a jittery token stream."
+timing:
+  ttft_ms: 350
+  tokens_per_second: 45
+  jitter_ms: 40
+  burst_frames: 3
+fault:
+  kind: none
+  rate: 0.0

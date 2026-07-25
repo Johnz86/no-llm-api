@@ -2,8 +2,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use arc_swap::ArcSwap;
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderName, HeaderValue, header};
+use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::Sse;
 use axum::response::{Html, IntoResponse, Response};
@@ -14,13 +15,17 @@ use serde::de::{self, Deserializer, MapAccess, Visitor};
 use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer, ExposeHeaders};
 use uuid::Uuid;
 
-use crate::config::CorsSettings;
+use crate::config::{AuthSettings, ControlPlaneSettings, CorsSettings};
+use crate::http::auth;
+use crate::http::control::{self, RequestLog};
 use crate::http::error::{ApiError, not_found_fallback};
 use crate::model::{
     ChatCompletionList, ChatCompletionMessageList, ChatCompletionRequest, ChatCompletionResponse,
 };
 use crate::models::ModelCatalogue;
 use crate::service::ChatService;
+use crate::sim::directive::Directive;
+use crate::sim::scenario::{FaultKind, Scenario};
 use crate::sim::stream::{CancelCounter, StreamPlan, sse_stream};
 use crate::store::{ListFilters, SortOrder};
 
@@ -37,27 +42,67 @@ pub struct AppState {
     pub service: Arc<ChatService>,
     pub cancels: Arc<CancelCounter>,
     pub models: ModelCatalogue,
+    /// The live behaviour profile, swappable through the control plane.
+    pub scenario: Arc<ArcSwap<Scenario>>,
+    /// The profile the process started with, restored by `POST /_mock/reset`.
+    pub boot_scenario: Arc<Scenario>,
+    pub seed: u64,
+    pub auth: AuthSettings,
+    pub control_plane: ControlPlaneSettings,
+    pub log: Arc<RequestLog>,
+}
+
+/// Everything the router needs beyond the service itself.
+pub struct RouterOptions {
+    pub models: ModelCatalogue,
+    pub cors: CorsSettings,
+    pub scenario: Scenario,
+    pub seed: u64,
+    pub auth: AuthSettings,
+    pub control_plane: ControlPlaneSettings,
+}
+
+impl Default for RouterOptions {
+    fn default() -> Self {
+        Self {
+            models: ModelCatalogue::builtin(),
+            cors: CorsSettings::default(),
+            scenario: Scenario::default(),
+            seed: 0,
+            auth: AuthSettings::default(),
+            control_plane: ControlPlaneSettings {
+                enabled: true,
+                token: None,
+            },
+        }
+    }
 }
 
 pub fn build_router(service: Arc<ChatService>) -> Router {
-    build_router_with_state(service).0
+    build_router_with_options(service, RouterOptions::default()).0
 }
 
-/// Builds the router and hands back the shared counters tests need to observe.
+/// Builds the router and hands back the state tests need to observe.
 pub fn build_router_with_state(service: Arc<ChatService>) -> (Router, Arc<CancelCounter>) {
-    build_router_with_options(service, ModelCatalogue::builtin(), &CorsSettings::default())
+    let (router, state) = build_router_with_options(service, RouterOptions::default());
+    (router, state.cancels)
 }
 
 pub fn build_router_with_options(
     service: Arc<ChatService>,
-    models: ModelCatalogue,
-    cors: &CorsSettings,
-) -> (Router, Arc<CancelCounter>) {
-    let cancels = Arc::new(CancelCounter::default());
+    options: RouterOptions,
+) -> (Router, AppState) {
+    let boot_scenario = Arc::new(options.scenario.clone());
     let state = AppState {
         service,
-        cancels: cancels.clone(),
-        models,
+        cancels: Arc::new(CancelCounter::default()),
+        models: options.models,
+        scenario: Arc::new(ArcSwap::new(boot_scenario.clone())),
+        boot_scenario,
+        seed: options.seed,
+        auth: options.auth,
+        control_plane: options.control_plane,
+        log: Arc::new(RequestLog::default()),
     };
     let routes = Router::new()
         .route(
@@ -81,17 +126,50 @@ pub fn build_router_with_options(
     let root = Router::new()
         .route("/", get(serve_index))
         .route("/health", get(health))
-        .with_state(state);
+        .with_state(state.clone());
 
-    let app = root
-        .merge(routes.clone())
-        .nest("/v1", routes)
+    let mut app = root.merge(routes.clone()).nest("/v1", routes);
+    if state.control_plane.enabled {
+        app = app.merge(control::router(state.clone()));
+    }
+
+    let app = app
         .fallback(not_found_fallback)
         .method_not_allowed_fallback(method_not_allowed)
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_auth,
+        ))
+        .layer(middleware::from_fn_with_state(state.clone(), log_request))
         .layer(middleware::from_fn(request_id_layer))
-        .layer(cors_layer(cors));
+        .layer(cors_layer(&options.cors));
 
-    (app, cancels)
+    (app, state)
+}
+
+/// Records a redacted line per request for `GET /_mock/requests`.
+async fn log_request(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let method = request.method().to_string();
+    let path = request.uri().path().to_string();
+    let headers: Vec<(String, String)> = request
+        .headers()
+        .iter()
+        .map(|(name, value)| control::redact(name.as_str(), value.to_str().unwrap_or("")))
+        .collect();
+    let response = next.run(request).await;
+    state.log.record(control::LoggedRequest {
+        method,
+        path,
+        status: response.status().as_u16(),
+        model: None,
+        stream: false,
+        headers,
+    });
+    response
 }
 
 /// Mirrors origin and requested headers so no SDK header list can go stale.
@@ -216,6 +294,7 @@ async fn list_chat_completions(
 
 async fn create_chat_completion(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     body: Result<Json<ChatCompletionRequest>, axum::extract::rejection::JsonRejection>,
 ) -> Result<Response, ApiError> {
     let Json(request) = body?;
@@ -225,26 +304,112 @@ async fn create_chat_completion(
         )
         .with_param("messages"));
     }
+
+    let scenario = state.scenario.load_full();
+    let directive = Directive::from_headers(
+        headers
+            .iter()
+            .filter_map(|(name, value)| value.to_str().ok().map(|value| (name.as_str(), value))),
+    )
+    .merge(
+        request
+            .x_simulate
+            .as_ref()
+            .map(Directive::from_value)
+            .unwrap_or_default(),
+    );
+    let (timing, fault) = directive.apply(&scenario);
+
     let stream = request.stream;
     let prepared = state.service.create_completion(request).await?;
     let match_kind = HeaderValue::from_static(prepared.match_kind.as_str());
+    let plan_seed = state.seed ^ plan_seed_of(&prepared.response.id);
+
+    // An http_error fault answers before any streaming starts, the way a real
+    // rate limit or outage does.
+    if fault.kind == FaultKind::HttpError && fault_fires(&fault, plan_seed) {
+        return Err(http_fault_error(&fault));
+    }
+
     if !stream {
         let mut response = Json(prepared.response).into_response();
         response.headers_mut().insert(&SIMULATE_MATCH, match_kind);
         return Ok(response);
     }
 
-    let plan = StreamPlan::new(
+    let plan = StreamPlan::with_profile(
         prepared,
         state.service.tokenizer().as_ref(),
         state.service.tokens_per_second(),
+        &timing,
+        &fault,
+        plan_seed,
     );
+    let keep_alive = plan.keep_alive();
 
-    let mut response = Sse::new(sse_stream(plan, state.cancels.clone())).into_response();
-    let headers = response.headers_mut();
-    headers.insert(&ACCEL_BUFFERING, HeaderValue::from_static("no"));
-    headers.insert(&SIMULATE_MATCH, match_kind);
+    let sse = Sse::new(sse_stream(plan, state.cancels.clone()));
+    let mut response = if keep_alive {
+        sse.keep_alive(
+            axum::response::sse::KeepAlive::new()
+                .interval(Duration::from_secs(5))
+                .text("ping"),
+        )
+        .into_response()
+    } else {
+        sse.into_response()
+    };
+    let response_headers = response.headers_mut();
+    response_headers.insert(&ACCEL_BUFFERING, HeaderValue::from_static("no"));
+    response_headers.insert(&SIMULATE_MATCH, match_kind);
     Ok(response)
+}
+
+/// A stable per-request seed, derived from the already-derived completion id.
+fn plan_seed_of(id: &str) -> u64 {
+    let mut digest = crate::sim::digest::Digest::new();
+    digest.field(id.as_bytes());
+    digest.finish()
+}
+
+fn fault_fires(fault: &crate::sim::scenario::Fault, seed: u64) -> bool {
+    if fault.rate >= 1.0 {
+        return true;
+    }
+    if fault.rate <= 0.0 {
+        return false;
+    }
+    use rand::{RngExt, SeedableRng};
+    rand::rngs::StdRng::seed_from_u64(seed).random::<f64>() < fault.rate
+}
+
+fn http_fault_error(fault: &crate::sim::scenario::Fault) -> ApiError {
+    let status = fault
+        .status
+        .and_then(|status| StatusCode::from_u16(status).ok())
+        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    let (message, kind, code) = match status {
+        StatusCode::TOO_MANY_REQUESTS => (
+            "Rate limit reached for requests. Please try again later.".to_string(),
+            "rate_limit_error",
+            Some("rate_limit_exceeded"),
+        ),
+        StatusCode::SERVICE_UNAVAILABLE => (
+            "The engine is currently overloaded, please try again later.".to_string(),
+            "server_error",
+            Some("service_unavailable"),
+        ),
+        other => (
+            format!("The server had an error processing your request ({other})."),
+            "server_error",
+            None,
+        ),
+    };
+    let mut error = ApiError::new(status, message, kind);
+    if let Some(code) = code {
+        error = error.with_code(code);
+    }
+    error.retry_after = fault.retry_after;
+    error
 }
 
 async fn get_chat_completion(

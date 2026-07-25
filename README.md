@@ -13,20 +13,73 @@ The binary listens on `127.0.0.1:8080` by default. On first launch it materialis
 
 ## Configuration
 
-Environment variables control runtime behaviour:
+Every setting is a flag with an environment fallback. `no-llm-api --help` is the full reference and
+`no-llm-api --print-config` prints the resolved configuration as JSON without starting the server.
 
-| Variable | Description | Default |
-| --- | --- | --- |
-| `BIND_ADDRESS` | Socket address passed to `TcpListener::bind`. | `127.0.0.1:8080` |
-| `TOKENS_PER_SECOND` | Streaming token budget; controls SSE pacing. | `30` |
-| `DATASET_SOURCE` | `parquet` (deterministic fixtures) or `live` (proxy real OpenAI/Azure). | `parquet` |
-| `DATASET_PATH` | Path to the parquet fixture to load (and optionally append to). | `data/conversations.parquet` |
-| `TOKENIZER_MODEL` | Tokenizer preset loaded via `tiktoken-rs` (`cl100k_base`, `o200k_base`, `p50k_base`, `p50k_edit`, `r50k_base`). | `cl100k_base` |
-| `MODELS_PATH` | JSON catalogue backing `GET /models`. Accepts a bare array or `{ "data": [...] }`. | `data/models.json` when present |
-| `MODELS` | Comma-separated model ids; used when no catalogue file is available. | built-in list |
-| `NO_LLM_CORS_ORIGINS` | `*` mirrors the request `Origin`; otherwise a comma-separated allow-list. | `*` |
-| `LIVE_RECORD` | `true`/`1` to persist live completions into a parquet file. | `false` |
-| `LIVE_RECORD_PATH` | Output parquet when recording live sessions (falls back to `DATASET_PATH`). | - |
+| Flag | Variable | Description | Default |
+| --- | --- | --- | --- |
+| `--bind-address` | `BIND_ADDRESS` | Socket address passed to `TcpListener::bind`. | `127.0.0.1:8080` |
+| `--tokens-per-second` | `TOKENS_PER_SECOND` | Streaming token budget; controls SSE pacing. | `30` |
+| `--dataset-source` | `DATASET_SOURCE` | `parquet` (deterministic fixtures) or `live` (proxy real OpenAI/Azure). | `parquet` |
+| `--dataset-path` | `DATASET_PATH` | Path to the parquet fixture to load (and optionally append to). | `data/conversations.parquet` |
+| `--tokenizer` | `TOKENIZER_MODEL` | Tokenizer preset loaded via `tiktoken-rs` (`cl100k-base`, `o200k-base`, `p50k-base`, `p50k-edit`, `r50k-base`). | `cl100k-base` |
+| `--models-path` | `MODELS_PATH` | JSON catalogue backing `GET /models`. Accepts a bare array or `{ "data": [...] }`. | `data/models.json` when present |
+| `--models` | `MODELS` | Comma-separated model ids; used when no catalogue file is available. | built-in list |
+| `--cors-origins` | `NO_LLM_CORS_ORIGINS` | `*` mirrors the request `Origin`; otherwise a comma-separated allow-list. | `*` |
+| `--scenario` | `NO_LLM_SCENARIO` | Behaviour profile: a built-in name or a path to a YAML file. | `default` |
+| `--seed` | `NO_LLM_SEED` | Seed for every simulated random decision. | `0` |
+| `--identity-mode` | `NO_LLM_IDENTITY_MODE` | `derived` (reproducible ids and `created`) or `clock`. | `derived` |
+| `--auth-mode` | `NO_LLM_AUTH_MODE` | `off`, `any-bearer`, or `keys`. | `off` |
+| `--auth-keys` | `NO_LLM_AUTH_KEYS` | Comma-separated accepted bearer keys for `keys` mode. | - |
+| `--auth-forbidden-keys` | `NO_LLM_AUTH_FORBIDDEN_KEYS` | Keys that answer `403` instead of `401`. | - |
+| `--control-plane` | `NO_LLM_CONTROL_PLANE` | Expose `/_mock`. Defaults to on for loopback binds only. | loopback only |
+| `--control-token` | `NO_LLM_CONTROL_TOKEN` | Bearer token the control plane requires when set. | - |
+| `--live-record` | `LIVE_RECORD` | Persist live completions into a parquet file. | `false` |
+| `--live-record-path` | `LIVE_RECORD_PATH` | Output parquet when recording live sessions (falls back to `DATASET_PATH`). | - |
+| `--print-config` | - | Print the resolved configuration as JSON and exit. | - |
+
+## Scenarios
+
+A scenario is a behaviour profile: pacing and failure injection. Seven are built in, and
+`--scenario ./my-profile.yaml` loads one from disk.
+
+| Name | Behaviour |
+| --- | --- |
+| `default` | Deterministic pacing at the configured rate, no faults. |
+| `fast` | As quick as the transport allows. |
+| `slow` | 1.2 s to first token, 4 tokens/s - spinners and cancel buttons become visible. |
+| `realistic` | Short think, jittery stream, small opening burst. |
+| `flaky` | Half of all streams die mid-flight with an error frame, then `[DONE]`. |
+| `rate-limited` | Every request answers `429` with `Retry-After`. |
+| `outage` | Every request answers `503`. |
+
+Per-request overrides beat the scenario, which makes parallel tests safe. Send an `X-Simulate-*`
+header or an `x_simulate` object in the request body:
+
+```bash
+curl -N http://127.0.0.1:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -H 'X-Simulate-Fault: http_error;status=429;retry_after=3' \
+  -d '{"model":"mock-gpt-4o","messages":[{"role":"user","content":"hi"}]}'
+```
+
+Recognised directives: `fault` (`stall`, `drop`, `sse_error`, `http_error`, `slow_then_recover`)
+with `status`, `retry_after`, `after_ms`, `after_frames`, `rate`; plus `ttft_ms`,
+`tokens_per_second`, `jitter_ms`, `chunk_tokens` and `burst_frames`.
+
+## Control plane
+
+`/_mock` is on by default for loopback binds only, and requires a bearer token when
+`--control-token` is set.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /_mock/scenario` | The live profile. |
+| `PUT /_mock/scenario` | Replace it wholesale. |
+| `PATCH /_mock/scenario` | Merge a partial profile, member by member. |
+| `POST /_mock/reset` | Restore the profile the process started with and clear the log. |
+| `GET /_mock/models` | Catalogue including simulation profiles. |
+| `GET /_mock/requests` | The last 100 requests, with credentials redacted. |
 
 When `DATASET_SOURCE=live`, supply credentials for either OpenAI (`OPENAI_API_KEY`, optional `OPENAI_API_BASE`, `OPENAI_ORG_ID`, `OPENAI_PROJECT_ID`) or Azure OpenAI (`AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT_NAME`, optional `AZURE_OPENAI_API_VERSION`). The server converts live responses back into the mock schema so existing clients continue to work.
 

@@ -191,6 +191,23 @@ impl ModelCatalogue {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    /// The catalogue including simulation profiles, for `GET /_mock/models` only.
+    pub fn debug_view(&self) -> serde_json::Value {
+        serde_json::json!({
+            "object": "list",
+            "data": self
+                .entries
+                .iter()
+                .map(|entry| serde_json::json!({
+                    "id": entry.id,
+                    "created": entry.created,
+                    "owned_by": entry.owned_by,
+                    "profile": entry.profile,
+                }))
+                .collect::<Vec<_>>(),
+        })
+    }
 }
 
 fn to_model(entry: &ModelEntry) -> Model {

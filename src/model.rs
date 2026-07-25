@@ -160,6 +160,9 @@ pub struct ChatCompletionRequest {
     pub user: Option<String>,
     #[serde(default)]
     pub store: Option<bool>,
+    /// Per-request simulation directive; never echoed back.
+    #[serde(default, skip_serializing)]
+    pub x_simulate: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

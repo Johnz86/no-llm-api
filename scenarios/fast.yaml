@@ -1,0 +1,10 @@
+name: fast
+description: As quick as the transport allows; for test suites that only assert shape.
+timing:
+  ttft_ms: 0
+  tokens_per_second: 1000
+  jitter_ms: 0
+  burst_frames: 16
+fault:
+  kind: none
+  rate: 0.0

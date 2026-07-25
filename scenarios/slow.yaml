@@ -1,0 +1,10 @@
+name: slow
+description: Deliberately sluggish, so a GUI's spinner, cancel button and timeouts are visible.
+timing:
+  ttft_ms: 1200
+  tokens_per_second: 4
+  jitter_ms: 0
+  burst_frames: 0
+fault:
+  kind: none
+  rate: 0.0

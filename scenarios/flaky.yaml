@@ -1,0 +1,11 @@
+name: flaky
+description: Half of all streams die mid-flight with an error frame, to exercise retry paths.
+timing:
+  ttft_ms: 200
+  tokens_per_second: 20
+  jitter_ms: 25
+  burst_frames: 0
+fault:
+  kind: sse_error
+  rate: 0.5
+  after_frames: 3

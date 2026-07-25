@@ -1,5 +1,9 @@
+pub mod auth;
+pub mod control;
 pub mod error;
-mod routes;
+pub mod routes;
 
 pub use error::{ApiError, ErrorBody, ErrorEnvelope};
-pub use routes::{AppState, build_router, build_router_with_options, build_router_with_state};
+pub use routes::{
+    AppState, RouterOptions, build_router, build_router_with_options, build_router_with_state,
+};

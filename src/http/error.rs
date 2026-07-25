@@ -32,6 +32,8 @@ pub struct ApiError {
     pub status: StatusCode,
     pub body: ErrorBody,
     pub www_authenticate: bool,
+    /// Seconds for a `Retry-After` header, which is what client backoff reads.
+    pub retry_after: Option<u64>,
 }
 
 impl ApiError {
@@ -45,6 +47,7 @@ impl ApiError {
                 code: None,
             },
             www_authenticate: false,
+            retry_after: None,
         }
     }
 
@@ -137,11 +140,18 @@ impl From<QueryRejection> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        let retry_after = self.retry_after;
+        let www_authenticate = self.www_authenticate;
         let mut response = (self.status, Json(ErrorEnvelope { error: self.body })).into_response();
-        if self.www_authenticate {
+        if www_authenticate {
             response
                 .headers_mut()
                 .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+        }
+        if let Some(seconds) = retry_after
+            && let Ok(value) = HeaderValue::from_str(&seconds.to_string())
+        {
+            response.headers_mut().insert(header::RETRY_AFTER, value);
         }
         response
     }

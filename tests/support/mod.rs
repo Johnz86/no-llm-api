@@ -7,8 +7,9 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use no_llm_api::dataset::{ConversationScripts, DatasetRow, write_dataset};
-use no_llm_api::http::build_router_with_state;
+use no_llm_api::http::{RouterOptions, build_router_with_options};
 use no_llm_api::service::ChatService;
+use no_llm_api::sim::scenario::Scenario;
 use no_llm_api::sim::stream::CancelCounter;
 use tempfile::TempDir;
 use tiktoken_rs::cl100k_base;
@@ -51,12 +52,30 @@ pub fn tool_calls_json() -> String {
 pub struct Fixture {
     pub app: axum::Router,
     pub cancels: Arc<CancelCounter>,
+    pub state: no_llm_api::http::AppState,
     _dir: TempDir,
 }
 
 /// Builds a router backed by a purpose-written parquet fixture.
 pub fn fixture(tokens_per_second: u32) -> Fixture {
     fixture_with_rows(tokens_per_second, &default_rows())
+}
+
+/// A router running a named built-in scenario or an explicit profile.
+pub fn fixture_with_scenario(tokens_per_second: u32, scenario: Scenario) -> Fixture {
+    build(
+        tokens_per_second,
+        &default_rows(),
+        RouterOptions {
+            scenario,
+            ..RouterOptions::default()
+        },
+    )
+}
+
+/// A router with arbitrary options, for auth and control-plane tests.
+pub fn fixture_with_options(tokens_per_second: u32, options: RouterOptions) -> Fixture {
+    build(tokens_per_second, &default_rows(), options)
 }
 
 pub fn default_rows() -> Vec<DatasetRow<'static>> {
@@ -103,6 +122,10 @@ pub fn row(
 }
 
 pub fn fixture_with_rows(tokens_per_second: u32, rows: &[DatasetRow<'_>]) -> Fixture {
+    build(tokens_per_second, rows, RouterOptions::default())
+}
+
+fn build(tokens_per_second: u32, rows: &[DatasetRow<'_>], options: RouterOptions) -> Fixture {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("fixture.parquet");
     write_dataset(&path, rows).expect("write fixture dataset");
@@ -114,11 +137,12 @@ pub fn fixture_with_rows(tokens_per_second: u32, rows: &[DatasetRow<'_>]) -> Fix
         tokenizer,
         NonZeroU32::new(tokens_per_second).expect("non-zero rate"),
     ));
-    let (app, cancels) = build_router_with_state(service);
+    let (app, state) = build_router_with_options(service, options);
 
     Fixture {
         app,
-        cancels,
+        cancels: state.cancels.clone(),
+        state,
         _dir: dir,
     }
 }
@@ -204,4 +228,47 @@ pub fn assert_error_envelope(text: &str) -> serde_json::Value {
         "error message must be non-empty: {text}"
     );
     value
+}
+
+/// A request with extra headers, for auth and simulation-directive tests.
+pub async fn send_with_headers(
+    app: axum::Router,
+    method: &str,
+    uri: &str,
+    body: Option<serde_json::Value>,
+    extra: &[(&str, &str)],
+) -> (axum::http::StatusCode, axum::http::HeaderMap, String) {
+    use axum::body::Body;
+    use axum::http::Request;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    let mut builder = Request::builder().method(method).uri(uri);
+    if body.is_some() {
+        builder = builder.header("content-type", "application/json");
+    }
+    for (name, value) in extra {
+        builder = builder.header(*name, *value);
+    }
+    let request = builder
+        .body(
+            body.map(|value| Body::from(value.to_string()))
+                .unwrap_or_else(Body::empty),
+        )
+        .expect("request");
+
+    let response = app.oneshot(request).await.expect("router call");
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
+    (
+        status,
+        headers,
+        String::from_utf8_lossy(&bytes).into_owned(),
+    )
 }
