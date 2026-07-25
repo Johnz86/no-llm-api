@@ -34,9 +34,9 @@ Verification baseline: `ASYNC_OPENAI_COMPAT=1 cargo test` passes; note this repo
 
 ## Delivered so far
 
-M1-M4 are complete and M5 is partly done. Verified with `cargo test` (137 results across 11 targets,
-no environment variables, no network), `cargo clippy --all-targets -- -D warnings` on both feature
-sets, a running server, and a distroless container.
+M1-M4 are complete and M5 is largely done. Verified with `cargo test` (158 test results across 11
+targets, no environment variables, no network) on both the default and `live` feature sets,
+`cargo clippy --all-targets -- -D warnings` on both, a running server, and a distroless container.
 
 | Commit | Milestone | Items |
 | --- | --- | --- |
@@ -46,12 +46,15 @@ sets, a running server, and a distroless container.
 | `1ca52d1` | M2 | R12, R13, R14, R16, R17 |
 | `22edc92` | M3 | R18, R19, R20, R21, R22, R23 |
 | `6f97a58` | M4 | R24, R25, R26, R27, R28, R29, R38 |
-| this commit | M5 (part) | R40, R41, R43, R44, R50 |
+| `f16bd52` | M5 (part) | R40, R41, R43, R44, R50 |
+| `bdaa813` | M4 | R30, R32 |
+| `6873dd0` | M4 | R33, R34 |
+| `1ac1612` | M4/M5 | R39, R49 |
+| `bd6ad79` | M5 | R42 |
 
-Still open: R30-R37 (lean response object, typed request enums, validation, per-model profiles,
-reasoning content, `n > 1`, YAML fixture sets, coverage fixtures), R39 (tracing), R42 (live
-hardening), R45's README/CLI reconciliation remainder, R46 (spec slimming), R47 (release plumbing),
-R48 (Playwright), R49 (metrics).
+Still open: R31 (typed request enums, the one L item on the critical path), R35 (`n > 1`),
+R36 and R37 (YAML fixture sets and behaviour-coverage fixtures), R45's README CLI-output section,
+R46 (pruned spec extract), R47 (release plumbing), R48 (Playwright e2e).
 
 ## Critical path
 
