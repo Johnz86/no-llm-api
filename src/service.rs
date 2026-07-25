@@ -8,6 +8,7 @@ use tiktoken_rs::CoreBPE;
 use uuid::Uuid;
 
 use crate::dataset::{AssistantMessage, ConversationScript, ConversationScripts};
+use crate::live::{LiveBackend, LiveBackendError};
 use crate::model::{
     ChatCompletionChoice, ChatCompletionChunk, ChatCompletionChunkChoice, ChatCompletionChunkDelta,
     ChatCompletionRequest, ChatCompletionRequestMessage, ChatCompletionResponse,
@@ -15,11 +16,48 @@ use crate::model::{
     StoredMessage,
 };
 use crate::store::{CompletionStore, ListFilters, SortOrder, StoredCompletion};
+use thiserror::Error;
 
-pub struct ChatService {
+enum ChatBackend {
+    Dataset(DatasetBackend),
+    Live(LiveBackend),
+}
+
+struct DatasetBackend {
     scripts: Arc<[ConversationScript]>,
     cursors: Vec<AtomicUsize>,
     rotation: AtomicUsize,
+}
+
+impl DatasetBackend {
+    fn match_assistant_response(
+        &self,
+        request: &ChatCompletionRequest,
+    ) -> Option<AssistantMessage> {
+        let user_message = last_user_message(&request.messages)?;
+        self.scripts
+            .iter()
+            .find_map(|script| script.response_for_user(&user_message))
+    }
+
+    fn next_assistant(&self) -> AssistantMessage {
+        let script_index = self.rotation.fetch_add(1, Ordering::Relaxed) % self.scripts.len();
+        let script = &self.scripts[script_index];
+        let turn_index = self.cursors[script_index].fetch_add(1, Ordering::Relaxed);
+        script.assistant_at(turn_index)
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum ServiceError {
+    #[error("live backend error: {0}")]
+    Live(#[from] LiveBackendError),
+    #[error("no choices returned from completion")]
+    EmptyResponse,
+}
+
+pub struct ChatService {
+    backend: ChatBackend,
     token_rate: NonZeroU32,
     store: CompletionStore,
     tokenizer: Arc<CoreBPE>,
@@ -39,10 +77,26 @@ impl ChatService {
     ) -> Self {
         let shared = scripts.share();
         let cursors = shared.iter().map(|_| AtomicUsize::new(0)).collect();
-        Self {
+        let backend = ChatBackend::Dataset(DatasetBackend {
             scripts: shared,
             cursors,
             rotation: AtomicUsize::new(0),
+        });
+        Self {
+            backend,
+            token_rate,
+            store: CompletionStore::new(),
+            tokenizer,
+        }
+    }
+
+    pub fn with_live(
+        backend: LiveBackend,
+        tokenizer: Arc<CoreBPE>,
+        token_rate: NonZeroU32,
+    ) -> Self {
+        Self {
+            backend: ChatBackend::Live(backend),
             token_rate,
             store: CompletionStore::new(),
             tokenizer,
@@ -57,7 +111,21 @@ impl ChatService {
         self.tokenizer.clone()
     }
 
-    pub async fn create_completion(&self, request: ChatCompletionRequest) -> PreparedCompletion {
+    pub async fn create_completion(
+        &self,
+        request: ChatCompletionRequest,
+    ) -> Result<PreparedCompletion, ServiceError> {
+        match &self.backend {
+            ChatBackend::Dataset(dataset) => self.create_completion_dataset(dataset, request).await,
+            ChatBackend::Live(live) => self.create_completion_live(live, request).await,
+        }
+    }
+
+    async fn create_completion_dataset(
+        &self,
+        dataset: &DatasetBackend,
+        request: ChatCompletionRequest,
+    ) -> Result<PreparedCompletion, ServiceError> {
         let store_enabled = request.store.unwrap_or(false);
         let include_usage_chunk = request
             .stream_options
@@ -65,20 +133,18 @@ impl ChatService {
             .map(|options| options.include_usage)
             .unwrap_or(false);
 
-        let assistant = match self.match_assistant_response(&request) {
+        let assistant = match dataset.match_assistant_response(&request) {
             Some(message) => message,
-            None => {
-                let script_index =
-                    self.rotation.fetch_add(1, Ordering::Relaxed) % self.scripts.len();
-                let script = &self.scripts[script_index];
-                let turn_index = self.cursors[script_index].fetch_add(1, Ordering::Relaxed);
-                script.assistant_at(turn_index)
-            }
+            None => dataset.next_assistant(),
         };
 
         let mut tokens: Vec<u32> = assistant.tokens.iter().copied().collect();
-        let mut assistant_text = assistant.text.as_ref().to_string();
-        let mut finish_reason = FinishReason::Stop;
+        let mut assistant_text = assistant.rendered_text.as_ref().to_string();
+        let mut finish_reason = assistant
+            .finish_reason
+            .clone()
+            .unwrap_or(FinishReason::Stop);
+        let mut truncated = false;
 
         if let Some(cap) = request
             .max_completion_tokens
@@ -96,39 +162,59 @@ impl ChatService {
                         "failed to decode truncated completion; using full response"
                     );
                     tokens = assistant.tokens.iter().copied().collect();
-                    assistant_text = assistant.text.as_ref().to_string();
+                    assistant_text = assistant.rendered_text.as_ref().to_string();
                 }
             }
+            truncated = true;
             finish_reason = FinishReason::Length;
         }
 
-        let completion_token_count = tokens.len() as u32;
-        let prompt_tokens = count_prompt_tokens(&request.messages, &self.tokenizer);
-
-        let usage = ChatCompletionUsage {
-            prompt_tokens,
-            completion_tokens: completion_token_count,
-            total_tokens: prompt_tokens + completion_token_count,
-            prompt_tokens_details: None,
-            completion_tokens_details: None,
-        };
+        let computed_prompt_tokens = count_prompt_tokens(&request.messages, &self.tokenizer);
+        let mut usage = assistant.usage.clone().unwrap_or_else(|| {
+            let completion_tokens = tokens.len() as u32;
+            ChatCompletionUsage {
+                prompt_tokens: computed_prompt_tokens,
+                completion_tokens,
+                total_tokens: computed_prompt_tokens + completion_tokens,
+                prompt_tokens_details: None,
+                completion_tokens_details: None,
+            }
+        });
+        if truncated || assistant.usage.is_none() {
+            usage.completion_tokens = tokens.len() as u32;
+            usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
+        }
 
         let created = unix_timestamp();
         let identifier = format!("chatcmpl-{}", Uuid::new_v4());
         let request_id = format!("req_{}", Uuid::new_v4().as_simple());
 
+        let message_content = if truncated {
+            if assistant_text.is_empty() {
+                None
+            } else {
+                Some(MessageContent::Text(assistant_text.clone()))
+            }
+        } else if let Some(content) = assistant.content.clone() {
+            Some(content)
+        } else if assistant_text.is_empty() {
+            None
+        } else {
+            Some(MessageContent::Text(assistant_text.clone()))
+        };
+
         let completion_message = ChatCompletionResponseMessage {
             role: ChatRole::Assistant,
-            content: Some(MessageContent::Text(assistant_text.clone())),
-            refusal: None,
-            tool_calls: None,
-            function_call: None,
-            audio: None,
+            content: message_content,
+            refusal: assistant.refusal.clone(),
+            tool_calls: assistant.tool_calls.clone(),
+            function_call: assistant.function_call.clone(),
+            audio: assistant.audio.clone(),
         };
 
         let choice = ChatCompletionChoice {
             index: 0,
-            message: completion_message,
+            message: completion_message.clone(),
             finish_reason: Some(finish_reason.clone()),
             logprobs: None,
         };
@@ -171,15 +257,49 @@ impl ChatService {
 
         if store_enabled {
             let stored_messages =
-                build_stored_messages(&identifier, &request.messages, assistant_text.clone());
+                build_stored_messages(&identifier, &request.messages, &completion_message);
             self.store.save(response.clone(), stored_messages).await;
         }
 
-        PreparedCompletion {
+        Ok(PreparedCompletion {
             response,
             tokens,
             include_usage_chunk,
+        })
+    }
+
+    async fn create_completion_live(
+        &self,
+        backend: &LiveBackend,
+        request: ChatCompletionRequest,
+    ) -> Result<PreparedCompletion, ServiceError> {
+        let store_enabled = request.store.unwrap_or(false);
+        let include_usage_chunk = request
+            .stream_options
+            .as_ref()
+            .map(|options| options.include_usage)
+            .unwrap_or(false);
+
+        let live = backend.create_completion(&request, &self.tokenizer).await?;
+        if live.response.choices.is_empty() {
+            return Err(ServiceError::EmptyResponse);
         }
+
+        let response = live.response;
+        if store_enabled {
+            let identifier = response.id.clone();
+            if let Some(choice) = response.choices.first() {
+                let stored_messages =
+                    build_stored_messages(&identifier, &request.messages, &choice.message);
+                self.store.save(response.clone(), stored_messages).await;
+            }
+        }
+
+        Ok(PreparedCompletion {
+            response,
+            tokens: live.tokens,
+            include_usage_chunk,
+        })
     }
 
     pub async fn list(
@@ -217,22 +337,12 @@ impl ChatService {
     ) -> Option<Vec<StoredMessage>> {
         self.store.messages(id, order, after, limit).await
     }
-
-    fn match_assistant_response(
-        &self,
-        request: &ChatCompletionRequest,
-    ) -> Option<AssistantMessage> {
-        let user_message = last_user_message(&request.messages)?;
-        self.scripts
-            .iter()
-            .find_map(|script| script.response_for_user(&user_message))
-    }
 }
 
 fn build_stored_messages(
     completion_id: &str,
     messages: &[ChatCompletionRequestMessage],
-    assistant_content: String,
+    assistant: &ChatCompletionResponseMessage,
 ) -> Vec<StoredMessage> {
     let mut stored = Vec::new();
     for (index, message) in messages.iter().enumerate() {
@@ -241,13 +351,21 @@ fn build_stored_messages(
             role: message.role.clone(),
             content: message.content.clone(),
             name: message.name.clone(),
+            refusal: message.refusal.clone(),
+            tool_calls: None,
+            function_call: None,
+            audio: None,
         });
     }
     stored.push(StoredMessage {
         id: format!("{}-{}", completion_id, stored.len()),
         role: ChatRole::Assistant,
-        content: Some(MessageContent::Text(assistant_content)),
+        content: assistant.content.clone(),
         name: None,
+        refusal: assistant.refusal.clone(),
+        tool_calls: assistant.tool_calls.clone(),
+        function_call: assistant.function_call.clone(),
+        audio: assistant.audio.clone(),
     });
     stored
 }
@@ -314,6 +432,7 @@ pub fn delta_for_text(content: String, include_role: bool) -> ChatCompletionChun
         function_call: None,
         tool_calls: None,
         refusal: None,
+        audio: None,
     }
 }
 
@@ -324,6 +443,7 @@ pub fn empty_delta() -> ChatCompletionChunkDelta {
         function_call: None,
         tool_calls: None,
         refusal: None,
+        audio: None,
     }
 }
 
@@ -375,7 +495,7 @@ mod tests {
         let service = ChatService::new(scripts, tokenizer, NonZeroU32::new(5).unwrap());
 
         let request = request_with_text("hello");
-        let result = service.create_completion(request.clone()).await;
+        let result = service.create_completion(request.clone()).await.unwrap();
         assert!(!result.tokens.is_empty());
         let stored = service
             .list(SortOrder::Ascending, None, 10, ListFilters::default())
@@ -384,7 +504,7 @@ mod tests {
 
         let mut second = request.clone();
         second.store = Some(true);
-        let stored_result = service.create_completion(second).await;
+        let stored_result = service.create_completion(second).await.unwrap();
         let stored = service
             .list(SortOrder::Ascending, None, 10, ListFilters::default())
             .await;
@@ -403,7 +523,7 @@ mod tests {
         let service = ChatService::new(scripts, tokenizer, NonZeroU32::new(30).unwrap());
 
         let request = request_with_text("Summarize the sprint update.");
-        let result = service.create_completion(request).await;
+        let result = service.create_completion(request).await.unwrap();
         let response_text = match &result.response.choices[0].message.content {
             Some(MessageContent::Text(text)) => text.as_str(),
             _ => panic!("unexpected response type"),
@@ -425,7 +545,7 @@ mod tests {
 
         let mut request = request_with_text("Summarize the sprint update.");
         request.max_completion_tokens = Some(5);
-        let result = service.create_completion(request).await;
+        let result = service.create_completion(request).await.unwrap();
         assert!(result.response.usage.completion_tokens <= 5);
         assert_eq!(
             result.tokens.len() as u32,

@@ -245,12 +245,20 @@ mod tests {
                 role: ChatRole::User,
                 content: Some(MessageContent::Text("hi".to_string())),
                 name: None,
+                refusal: None,
+                tool_calls: None,
+                function_call: None,
+                audio: None,
             },
             StoredMessage {
                 id: format!("{root}-1"),
                 role: ChatRole::Assistant,
                 content: Some(MessageContent::Text("ok".to_string())),
                 name: None,
+                refusal: None,
+                tool_calls: None,
+                function_call: None,
+                audio: None,
             },
         ]
     }

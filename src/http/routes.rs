@@ -16,8 +16,11 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::model::{
     ChatCompletionList, ChatCompletionMessageList, ChatCompletionRequest, ChatCompletionResponse,
+    ChatRole, MessageContent,
 };
-use crate::service::{ChatService, chunk_from_delta, delta_for_text, empty_delta, usage_chunk};
+use crate::service::{
+    ChatService, ServiceError, chunk_from_delta, delta_for_text, empty_delta, usage_chunk,
+};
 use crate::store::{ListFilters, SortOrder};
 
 #[derive(Clone)]
@@ -104,7 +107,10 @@ async fn create_chat_completion(
     Json(request): Json<ChatCompletionRequest>,
 ) -> Response {
     let stream = request.stream;
-    let prepared = state.service.create_completion(request).await;
+    let prepared = match state.service.create_completion(request).await {
+        Ok(value) => value,
+        Err(error) => return service_error(error),
+    };
     if !stream {
         return Json(prepared.response).into_response();
     }
@@ -119,6 +125,7 @@ async fn create_chat_completion(
         let delay = Duration::from_secs_f64(1.0 / rate.get() as f64);
         let mut rendered = String::new();
         let mut buffer: Vec<u32> = Vec::new();
+        let mut emitted = false;
 
         for (index, token) in tokens.into_iter().enumerate() {
             buffer.push(token);
@@ -138,6 +145,7 @@ async fn create_chat_completion(
                 );
                 match Event::default().json_data(&chunk) {
                     Ok(event) => {
+                        emitted = true;
                         if sender.send(Ok(event)).await.is_err() {
                             return;
                         }
@@ -154,11 +162,39 @@ async fn create_chat_completion(
             }
         }
 
+        let choice = response.choices.first().cloned();
+        let mut final_delta = empty_delta();
+        if let Some(choice) = choice {
+            if !emitted {
+                final_delta.role = Some(ChatRole::Assistant);
+                if let Some(content) = choice.message.content.clone() {
+                    match content {
+                        MessageContent::Text(text) if !text.is_empty() => {
+                            final_delta.content = Some(text);
+                        }
+                        MessageContent::Parts(parts) => {
+                            let rendered_parts = MessageContent::Parts(parts).render().into_owned();
+                            if !rendered_parts.is_empty() {
+                                final_delta.content = Some(rendered_parts);
+                            }
+                        }
+                        MessageContent::Text(_) => {}
+                    }
+                }
+            }
+            final_delta.refusal = choice.message.refusal.clone();
+            final_delta.function_call = choice.message.function_call.clone();
+            final_delta.tool_calls = choice.message.tool_calls.clone();
+            final_delta.audio = choice.message.audio.clone();
+        } else if !emitted {
+            final_delta.role = Some(ChatRole::Assistant);
+        }
+
         let finish = response
             .choices
             .first()
             .and_then(|choice| choice.finish_reason.clone());
-        let final_chunk = chunk_from_delta(&response, empty_delta(), finish);
+        let final_chunk = chunk_from_delta(&response, final_delta, finish);
         if let Ok(event) = Event::default().json_data(&final_chunk) {
             let _ = sender.send(Ok(event)).await;
         }
@@ -368,4 +404,14 @@ fn bad_request(message: &str) -> Response {
         },
     };
     (StatusCode::BAD_REQUEST, Json(body)).into_response()
+}
+
+fn service_error(error: ServiceError) -> Response {
+    let body = ErrorResponse {
+        error: ErrorBody {
+            message: error.to_string(),
+            r#type: "server_error".to_string(),
+        },
+    };
+    (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response()
 }

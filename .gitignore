@@ -1,1 +1,18 @@
 /target
+
+# Secrets and local environment
+.env
+.env.local
+*.pem
+
+# Vendored upstream clones kept for local reference only
+/async-openai
+/openai-func-enums
+
+# Large generated/duplicated spec copies
+/openapi.documented.yml
+
+# Local scratch
+tmp_patch
+/data/live.parquet
+/data/recordings.parquet

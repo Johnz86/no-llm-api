@@ -3,6 +3,22 @@ name = "no-llm-api"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "no_llm_api"
+path = "src/lib.rs"
+
+[[bin]]
+name = "no-llm-api"
+path = "src/main.rs"
+
+[[bin]]
+name = "recorder"
+path = "src/bin/recorder.rs"
+
+[[bin]]
+name = "regenerate_dataset"
+path = "src/bin/regenerate_dataset.rs"
+
 [dependencies]
 axum = { version = "0.8.6", features = ["macros", "json", "tokio"] }
 tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread", "time", "signal", "fs"] }
@@ -25,6 +41,8 @@ dotenvy = "0.15.7"
 indexmap = "2.12.0"
 once_cell = "1.21.3"
 tiktoken-rs = "0.7.0"
+async-openai = { path = "async-openai/async-openai" }
+clap = { version = "4.5.13", features = ["derive"] }
 
 [dev-dependencies]
 axum = { version = "0.8.6", features = ["macros", "json", "tokio"] }

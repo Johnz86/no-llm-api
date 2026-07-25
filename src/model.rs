@@ -310,6 +310,14 @@ pub struct StoredMessage {
     pub content: Option<MessageContent>,
     #[serde(default)]
     pub name: Option<String>,
+    #[serde(default)]
+    pub refusal: Option<String>,
+    #[serde(default)]
+    pub tool_calls: Option<Vec<ChatCompletionMessageToolCall>>,
+    #[serde(default)]
+    pub function_call: Option<FunctionCall>,
+    #[serde(default)]
+    pub audio: Option<ChatCompletionResponseMessageAudio>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -353,6 +361,8 @@ pub struct ChatCompletionChunkDelta {
     pub tool_calls: Option<Vec<ChatCompletionMessageToolCall>>,
     #[serde(default)]
     pub refusal: Option<String>,
+    #[serde(default)]
+    pub audio: Option<ChatCompletionResponseMessageAudio>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

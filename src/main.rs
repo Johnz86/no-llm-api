@@ -1,6 +1,7 @@
 mod config;
 mod dataset;
 mod http;
+mod live;
 mod model;
 mod service;
 mod store;
@@ -9,9 +10,10 @@ mod tokenizer;
 use std::sync::Arc;
 
 use anyhow::Result;
-use config::Settings;
+use config::{DatasetSettings, Settings};
 use dataset::ConversationScripts;
 use http::build_router;
+use live::LiveBackend;
 use service::ChatService;
 use tokenizer::load;
 use tokio::net::TcpListener;
@@ -21,14 +23,27 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     init_tracing();
     let settings = Settings::load()?;
-    dataset::ensure_sample_dataset(&settings.dataset_path)?;
     let tokenizer = load(&settings.tokenizer)?;
-    let scripts = ConversationScripts::load(&settings.dataset_path, &tokenizer)?;
-    let service = Arc::new(ChatService::new(
-        scripts,
-        tokenizer.clone(),
-        settings.tokens_per_second,
-    ));
+    let service = match &settings.dataset {
+        DatasetSettings::Parquet { path } => {
+            dataset::ensure_sample_dataset(path)?;
+            let scripts = ConversationScripts::load(path, &tokenizer)?;
+            Arc::new(ChatService::new(
+                scripts,
+                tokenizer.clone(),
+                settings.tokens_per_second,
+            ))
+        }
+        DatasetSettings::Live(live_settings) => {
+            let backend = LiveBackend::new(live_settings)
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+            Arc::new(ChatService::with_live(
+                backend,
+                tokenizer.clone(),
+                settings.tokens_per_second,
+            ))
+        }
+    };
     let app = build_router(service.clone());
     let listener = TcpListener::bind(settings.bind_address).await?;
     tracing::info!(target: "no_llm_api", "listening on {}", settings.bind_address);
