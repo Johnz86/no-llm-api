@@ -5,6 +5,7 @@ use serde_json::{Map, Value};
 use tiktoken_rs::CoreBPE;
 
 use crate::dataset::ConversationScripts;
+#[cfg(feature = "live")]
 use crate::live::{LiveBackend, LiveBackendError};
 use crate::model::{
     ChatCompletionChoice, ChatCompletionChunk, ChatCompletionChunkChoice, ChatCompletionChunkDelta,
@@ -20,11 +21,13 @@ use thiserror::Error;
 
 enum ChatBackend {
     Dataset(ScriptIndex),
+    #[cfg(feature = "live")]
     Live(LiveBackend),
 }
 
 #[derive(Debug, Error)]
 pub enum ServiceError {
+    #[cfg(feature = "live")]
     #[error("live backend error: {0}")]
     Live(#[from] LiveBackendError),
     #[error("no choices returned from completion")]
@@ -38,6 +41,7 @@ pub struct ChatService {
     tokenizer: Arc<CoreBPE>,
     identity_mode: IdentityMode,
     clock: Arc<dyn Clock>,
+    tokenizer_name: String,
 }
 
 pub struct PreparedCompletion {
@@ -60,9 +64,11 @@ impl ChatService {
             tokenizer,
             identity_mode: IdentityMode::default(),
             clock: Arc::new(SystemClock),
+            tokenizer_name: "cl100k_base".to_string(),
         }
     }
 
+    #[cfg(feature = "live")]
     pub fn with_live(
         backend: LiveBackend,
         tokenizer: Arc<CoreBPE>,
@@ -75,7 +81,14 @@ impl ChatService {
             tokenizer,
             identity_mode: IdentityMode::default(),
             clock: Arc::new(SystemClock),
+            tokenizer_name: "cl100k_base".to_string(),
         }
+    }
+
+    /// Records which tokenizer preset is in use, for readiness reporting.
+    pub fn with_tokenizer_name(mut self, name: impl Into<String>) -> Self {
+        self.tokenizer_name = name.into();
+        self
     }
 
     /// Overrides where `created` comes from; ids stay plan-derived either way.
@@ -93,6 +106,20 @@ impl ChatService {
         self.token_rate
     }
 
+    /// How many fixture conversations are loaded; zero means not ready.
+    pub fn script_count(&self) -> usize {
+        match &self.backend {
+            ChatBackend::Dataset(scripts) => scripts.len(),
+            #[cfg(feature = "live")]
+            ChatBackend::Live(_) => usize::MAX,
+        }
+    }
+
+    /// The tokenizer preset name, for readiness reporting.
+    pub fn tokenizer_name(&self) -> &str {
+        &self.tokenizer_name
+    }
+
     pub fn tokenizer(&self) -> Arc<CoreBPE> {
         self.tokenizer.clone()
     }
@@ -103,6 +130,7 @@ impl ChatService {
     ) -> Result<PreparedCompletion, ServiceError> {
         match &self.backend {
             ChatBackend::Dataset(dataset) => self.create_completion_dataset(dataset, request).await,
+            #[cfg(feature = "live")]
             ChatBackend::Live(live) => self.create_completion_live(live, request).await,
         }
     }
@@ -268,6 +296,7 @@ impl ChatService {
         })
     }
 
+    #[cfg(feature = "live")]
     async fn create_completion_live(
         &self,
         backend: &LiveBackend,

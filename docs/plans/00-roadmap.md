@@ -32,6 +32,27 @@ Do not redo these; the tree is at this state.
 Verification baseline: `ASYNC_OPENAI_COMPAT=1 cargo test` passes; note this reports 15 results for
 8 authored tests because `main.rs` re-declares the library's modules (R1).
 
+## Delivered so far
+
+M1-M4 are complete and M5 is partly done. Verified with `cargo test` (137 results across 11 targets,
+no environment variables, no network), `cargo clippy --all-targets -- -D warnings` on both feature
+sets, a running server, and a distroless container.
+
+| Commit | Milestone | Items |
+| --- | --- | --- |
+| `92c80b1` | scaffolding | R1, R2 |
+| `11eb951` | M2 (part) | R9, R10, R11 |
+| `3a9b8a3` | M1 | R3, R4, R5, R6, R7, R8, R15 |
+| `1ca52d1` | M2 | R12, R13, R14, R16, R17 |
+| `22edc92` | M3 | R18, R19, R20, R21, R22, R23 |
+| `6f97a58` | M4 | R24, R25, R26, R27, R28, R29, R38 |
+| this commit | M5 (part) | R40, R41, R43, R44, R50 |
+
+Still open: R30-R37 (lean response object, typed request enums, validation, per-model profiles,
+reasoning content, `n > 1`, YAML fixture sets, coverage fixtures), R39 (tracing), R42 (live
+hardening), R45's README/CLI reconciliation remainder, R46 (spec slimming), R47 (release plumbing),
+R48 (Playwright), R49 (metrics).
+
 ## Critical path
 
 Milestones are days of work, ordered so the cheapest GUI wins land first. Each exit criterion is runnable.

@@ -1,0 +1,18 @@
+# The smallest possible demo: the bundled test page at http://127.0.0.1:8080/.
+services:
+  no-llm-api:
+    build: .
+    image: no-llm-api:local
+    read_only: true
+    ports:
+      - "8080:8080"
+    environment:
+      BIND_ADDRESS: 0.0.0.0:8080
+      NO_LLM_SCENARIO: slow
+      # Expose the control plane on a published port only with a token.
+      NO_LLM_CONTROL_PLANE: "true"
+      NO_LLM_CONTROL_TOKEN: demo-token
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

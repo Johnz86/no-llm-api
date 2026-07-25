@@ -5,7 +5,6 @@ use clap::Parser;
 use no_llm_api::config::{Cli, DatasetSettings, IdentityModeArg, Settings};
 use no_llm_api::dataset::{self, ConversationScripts};
 use no_llm_api::http::{RouterOptions, build_router_with_options};
-use no_llm_api::live::LiveBackend;
 use no_llm_api::models::ModelCatalogue;
 use no_llm_api::service::ChatService;
 use no_llm_api::sim::identity::IdentityMode;
@@ -37,17 +36,16 @@ async fn main() -> Result<()> {
             let scripts = ConversationScripts::load(path, &tokenizer)?;
             Arc::new(
                 ChatService::new(scripts, tokenizer.clone(), settings.tokens_per_second)
-                    .with_identity_mode(identity_mode),
+                    .with_identity_mode(identity_mode)
+                    .with_tokenizer_name(settings.tokenizer.preset.clone()),
             )
         }
-        DatasetSettings::Live(live_settings) => {
-            let backend = LiveBackend::new(live_settings)
-                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-            Arc::new(
-                ChatService::with_live(backend, tokenizer.clone(), settings.tokens_per_second)
-                    .with_identity_mode(identity_mode),
-            )
-        }
+        DatasetSettings::Live(live_settings) => build_live_service(
+            live_settings,
+            tokenizer.clone(),
+            settings.tokens_per_second,
+            identity_mode,
+        )?,
     };
 
     let catalogue = ModelCatalogue::resolve(
@@ -78,6 +76,34 @@ async fn main() -> Result<()> {
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     Ok(())
+}
+
+/// Builds the live-proxy service, or explains that this binary was built without it.
+#[cfg(feature = "live")]
+fn build_live_service(
+    live_settings: &no_llm_api::config::LiveSettings,
+    tokenizer: std::sync::Arc<tiktoken_rs::CoreBPE>,
+    rate: std::num::NonZeroU32,
+    identity_mode: IdentityMode,
+) -> Result<Arc<ChatService>> {
+    let backend = no_llm_api::live::LiveBackend::new(live_settings)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    Ok(Arc::new(
+        ChatService::with_live(backend, tokenizer, rate).with_identity_mode(identity_mode),
+    ))
+}
+
+#[cfg(not(feature = "live"))]
+fn build_live_service(
+    _live_settings: &no_llm_api::config::LiveSettings,
+    _tokenizer: std::sync::Arc<tiktoken_rs::CoreBPE>,
+    _rate: std::num::NonZeroU32,
+    _identity_mode: IdentityMode,
+) -> Result<Arc<ChatService>> {
+    anyhow::bail!(
+        "DATASET_SOURCE=live requires a build with the `live` feature: \
+         cargo run --features live. The default build is offline on purpose."
+    )
 }
 
 /// Drains in-flight streams on Ctrl-C or SIGTERM instead of letting `docker stop`

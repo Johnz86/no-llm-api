@@ -163,6 +163,29 @@ pub struct ChatCompletionRequest {
     /// Per-request simulation directive; never echoed back.
     #[serde(default, skip_serializing)]
     pub x_simulate: Option<Value>,
+    /// Accepted and ignored: present in the spec, but they do not change what a
+    /// fixture server can answer. Rejecting them would break clients that always
+    /// send them, and echoing them would put non-spec keys in the response.
+    #[serde(default, skip_serializing)]
+    pub logprobs: Option<bool>,
+    #[serde(default, skip_serializing)]
+    pub top_logprobs: Option<u32>,
+    #[serde(default, skip_serializing)]
+    pub prediction: Option<Value>,
+    #[serde(default, skip_serializing)]
+    pub web_search_options: Option<Value>,
+    #[serde(default, skip_serializing)]
+    pub verbosity: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub prompt_cache_key: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub safety_identifier: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub functions: Option<Vec<Value>>,
+    #[serde(default, skip_serializing)]
+    pub include_obfuscation: Option<bool>,
+    #[serde(default, skip_serializing)]
+    pub n: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

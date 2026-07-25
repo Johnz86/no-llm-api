@@ -126,6 +126,7 @@ pub fn build_router_with_options(
     let root = Router::new()
         .route("/", get(serve_index))
         .route("/health", get(health))
+        .route("/ready", get(ready))
         .with_state(state.clone());
 
     let mut app = root.merge(routes.clone()).nest("/v1", routes);
@@ -235,6 +236,28 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
         "models": state.models.ids().count(),
         "tokens_per_second": state.service.tokens_per_second().get(),
     }))
+}
+
+/// Readiness: everything a probe needs to know the mock can actually answer.
+/// Never pings an upstream backend, and is exempt from auth and fault injection.
+async fn ready(State(state): State<AppState>) -> Response {
+    let scripts = state.service.script_count();
+    let scenario = state.scenario.load_full();
+    let body = serde_json::json!({
+        "status": if scripts > 0 { "ready" } else { "not_ready" },
+        "version": env!("CARGO_PKG_VERSION"),
+        "scripts": scripts,
+        "models": state.models.ids().count(),
+        "scenario": scenario.name,
+        "tokenizer": state.service.tokenizer_name(),
+        "tokens_per_second": state.service.tokens_per_second().get(),
+    });
+    let status = if scripts > 0 {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (status, Json(body)).into_response()
 }
 
 async fn list_models(State(state): State<AppState>) -> impl IntoResponse {

@@ -14,10 +14,17 @@ path = "src/main.rs"
 [[bin]]
 name = "recorder"
 path = "src/bin/recorder.rs"
+required-features = ["live"]
 
 [[bin]]
 name = "regenerate_dataset"
 path = "src/bin/regenerate_dataset.rs"
+
+[features]
+# The mock is offline by default: no reqwest, no TLS stack, no way to spend money
+# by accident during a GUI development loop.
+default = []
+live = ["dep:async-openai"]
 
 [dependencies]
 axum = { version = "0.8.9", features = ["macros", "json", "tokio"] }
@@ -41,7 +48,10 @@ dotenvy = "0.15.7"
 indexmap = "2.14.0"
 once_cell = "1.21.4"
 tiktoken-rs = "0.12.0"
-async-openai = { version = "0.41.1", features = ["chat-completion", "model"] }
+async-openai = { version = "0.41.1", features = [
+    "chat-completion",
+    "model",
+], optional = true }
 clap = { version = "4.6.4", features = ["derive", "env"] }
 async-stream = "0.3.6"
 tower-http = { version = "0.7.0", features = ["cors"] }
@@ -57,3 +67,4 @@ tower = "0.5.3"
 tempfile = "3.27.0"
 http-body-util = "0.1.3"
 insta = { version = "1.48.0", features = ["json"] }
+async-openai = { version = "0.41.1", features = ["chat-completion", "model"] }

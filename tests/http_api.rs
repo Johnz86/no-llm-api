@@ -410,6 +410,81 @@ async fn messages_pagination_reports_cursors() {
 }
 
 #[tokio::test]
+async fn ready_reports_what_a_probe_needs() {
+    let fixture = fixture(1000);
+    let (status, _, text) = send(fixture.app.clone(), "GET", "/ready", None).await;
+    assert_eq!(status, 200);
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(value["status"], "ready");
+    assert!(value["scripts"].as_u64().unwrap() >= 1);
+    assert_eq!(value["scenario"], "default");
+    assert_eq!(value["tokenizer"], "cl100k_base");
+    assert!(value["models"].as_u64().unwrap() >= 1);
+}
+
+#[tokio::test]
+async fn spec_fields_we_do_not_simulate_are_accepted_and_never_echoed() {
+    let fixture = fixture(1000);
+    let request = json!({
+        "model": "mock-gpt-4o",
+        "messages": [{ "role": "user", "content": PLAIN_PROMPT }],
+        "logprobs": true,
+        "top_logprobs": 3,
+        "prediction": { "type": "content", "content": "x" },
+        "web_search_options": {},
+        "verbosity": "low",
+        "prompt_cache_key": "cache-key",
+        "safety_identifier": "user-123",
+        "functions": [],
+        "include_obfuscation": true,
+        "n": 1,
+        "user": "someone"
+    });
+    let (status, _, text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/chat/completions",
+        Some(request),
+    )
+    .await;
+    assert_eq!(status, 200, "{text}");
+    for field in [
+        "logprobs",
+        "top_logprobs",
+        "prediction",
+        "web_search_options",
+        "verbosity",
+        "prompt_cache_key",
+        "safety_identifier",
+        "functions",
+        "include_obfuscation",
+        "x_simulate",
+    ] {
+        assert!(
+            !text.contains(&format!("\"{field}\"")),
+            "'{field}' must not be echoed in the response: {text}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn unknown_request_fields_do_not_break_the_call() {
+    let fixture = fixture(1000);
+    let (status, _, _) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/chat/completions",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "messages": [{ "role": "user", "content": PLAIN_PROMPT }],
+            "some_future_openai_field": { "nested": true }
+        })),
+    )
+    .await;
+    assert_eq!(status, 200);
+}
+
+#[tokio::test]
 async fn streamed_responses_disable_proxy_buffering() {
     use axum::body::Body;
     use axum::http::Request;

@@ -1,0 +1,41 @@
+# Open WebUI pointed at the mock: no API key, no network egress, no cost.
+services:
+  no-llm-api:
+    build: .
+    image: no-llm-api:local
+    read_only: true
+    ports:
+      - "8080:8080"
+    environment:
+      BIND_ADDRESS: 0.0.0.0:8080
+      TOKENS_PER_SECOND: "40"
+      NO_LLM_SCENARIO: realistic
+      # any-bearer accepts the non-empty key every GUI insists on typing.
+      NO_LLM_AUTH_MODE: any-bearer
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      # The image is distroless, so the binary itself is the probe.
+      test: ["CMD", "/app/no-llm-api", "--print-config"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    depends_on:
+      - no-llm-api
+    ports:
+      - "3000:8080"
+    environment:
+      OPENAI_API_BASE_URL: http://no-llm-api:8080/v1
+      OPENAI_API_KEY: sk-mock-key
+      WEBUI_AUTH: "false"
+      ENABLE_OLLAMA_API: "false"
+    volumes:
+      - open-webui:/app/backend/data
+
+volumes:
+  open-webui:

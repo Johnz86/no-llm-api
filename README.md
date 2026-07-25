@@ -83,12 +83,42 @@ with `status`, `retry_after`, `after_ms`, `after_frames`, `rate`; plus `ttft_ms`
 
 When `DATASET_SOURCE=live`, supply credentials for either OpenAI (`OPENAI_API_KEY`, optional `OPENAI_API_BASE`, `OPENAI_ORG_ID`, `OPENAI_PROJECT_ID`) or Azure OpenAI (`AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT_NAME`, optional `AZURE_OPENAI_API_VERSION`). The server converts live responses back into the mock schema so existing clients continue to work.
 
+## Docker
+
+The image is distroless and runs as `nonroot`, with the sample dataset baked in so it needs no
+writable volume:
+
+```bash
+docker build -t no-llm-api:local .
+docker run --rm --read-only -p 8080:8080 no-llm-api:local
+```
+
+`docker compose up` starts the mock plus Open WebUI on <http://127.0.0.1:3000> pointed at it;
+`docker compose -f docker-compose.demo.yml up` starts the mock alone with the bundled page.
+
+Because the container binds `0.0.0.0`, `/_mock` stays off unless you set `NO_LLM_CONTROL_PLANE=true`,
+and a token is expected when you do.
+
+## Live mode is opt-in at build time
+
+The default build links no HTTP client at all - no `reqwest`, no TLS stack - so an offline mock
+cannot reach a paid API even if credentials are present in its environment. Proxying a real backend
+requires the `live` feature:
+
+```bash
+cargo run --features live      # then set DATASET_SOURCE=live
+cargo run --features live --bin recorder -- --input recordings.json
+```
+
+Without it, `DATASET_SOURCE=live` exits with an explanatory error rather than starting a server that
+cannot proxy.
+
 ## Working with Datasets
 
 ### Regenerate bundled sample
 
 ```bash
-cargo run --bin regenerate_dataset
+cargo run --bin regenerate_dataset -- --force
 ```
 
 This recreates `data/conversations.parquet` with the enriched schema (tool calls, refusals, usage, audio metadata, finish reasons, etc.).
@@ -146,6 +176,7 @@ The server mirrors the primary Chat Completions endpoints, exposed both at the r
 - `GET /chat/completions/{completion_id}/messages`
 - `GET /models`
 - `GET /models/{model_id}`
+- `GET /health` and `GET /ready` (unversioned)
 
 Plus two unversioned routes: `GET /` serves the bundled test page (embedded in the binary, so it works
 from any working directory) and `GET /health` reports liveness without touching the dataset.

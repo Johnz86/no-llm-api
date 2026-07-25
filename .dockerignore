@@ -1,0 +1,13 @@
+target/
+.git/
+.github/
+docs/
+tests/
+e2e/
+data/
+*.parquet
+openapi.yaml
+openapi.provenance.json
+.env
+.env.local
+*.md

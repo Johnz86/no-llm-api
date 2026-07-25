@@ -1,8 +1,10 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `src/main.rs` is a thin shim over the library: it resolves settings, seeds data and serves the router. Every module lives in the library (`config`, `dataset`, `http`, `live`, `model`, `models`, `service`, `sim`, `store`, `tokenizer`) and is re-exported by `src/lib.rs`, so tests and the `recorder`/`regenerate_dataset` binaries reuse them. Never re-declare a module in `main.rs`: that compiles the crate twice and runs every unit test twice.
-- `src/sim/stream.rs` owns the SSE simulation (token pieces, pacing, terminal frames). `src/http/error.rs` owns the single error envelope. Streaming changes belong in `sim`, not in `routes.rs`.
+- `src/main.rs` is a thin shim over the library: it parses the CLI, resolves settings, seeds data and serves the router. Every module lives in the library (`config`, `dataset`, `http`, `live`, `model`, `models`, `service`, `sim`, `store`, `tokenizer`) and is re-exported by `src/lib.rs`, so tests and the `recorder`/`regenerate_dataset` binaries reuse them. Never re-declare a module in `main.rs`: that compiles the crate twice and runs every unit test twice.
+- `src/sim/` is the simulation engine: `stream.rs` (token pieces, pacing, faults, terminal frames), `select.rs` (deterministic fixture selection), `digest.rs` (FNV-1a; never `DefaultHasher`), `identity.rs` (plan-derived ids), `scenario.rs` (behaviour profiles), `directive.rs` (per-request overrides). `src/http/` holds `routes.rs`, `error.rs` (the single error envelope), `auth.rs` and `control.rs`. Streaming changes belong in `sim`, not in `routes.rs`.
+- Live proxying is behind the `live` feature. The default build links no HTTP client, so `cargo tree --edges normal` must stay free of `reqwest`, `rustls` and `async-openai`; keep it that way.
+- Behaviour profiles live in `scenarios/*.yaml` and are embedded with `include_str!`. Adding one means adding it to `sim::scenario::BUILTINS` and to the README table, which `tests/docs.rs` enforces.
 - Module-level unit tests live in inline `#[cfg(test)]` blocks. Cross-module and client-contract tests live in `tests/`; `tests/support/` holds the shared fixture builder and the SSE transcript harness.
 - Generated parquet fixtures reside under `data/` (created on demand). Keep additional scripted datasets there to avoid polluting `src/`.
 - Plans and design notes live in `docs/`; start at `docs/plans/00-roadmap.md`. The distilled Chat Completions contract is `docs/spec/chat-completions-scope.md`.
@@ -26,6 +28,9 @@
 - Use `#[tokio::test]` for async exercises and keep fixtures deterministic; see `service::tests` for patterns.
 - Group helper builders inside the test modules to avoid leaking test-only APIs into production code.
 - When expanding SSE or storage behavior, add assertions for ordering, pagination, and token pacing.
+- Selection and identity must stay pure functions of the request. No counters, no wall clock, no `DefaultHasher`: `tests/determinism.rs` asserts 64 concurrent identical requests produce exactly one distinct body.
+- Snapshots in `tests/snapshots/` are unredacted on purpose. Review a diff before accepting it with `cargo insta accept`; a change there means the bytes a GUI sees changed.
+- Timing assertions use the median inter-frame gap with wide tolerance (`tests/sse.rs`). Do not assert exact sleeps.
 
 ## Commit & Pull Request Guidelines
 - Write imperative, 72-character subject lines (e.g., `Add streaming error handling`).
