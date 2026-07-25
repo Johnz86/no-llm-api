@@ -3,8 +3,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use no_llm_api::config::{DatasetSettings, Settings};
 use no_llm_api::dataset::{self, ConversationScripts};
-use no_llm_api::http::build_router;
+use no_llm_api::http::build_router_with_options;
 use no_llm_api::live::LiveBackend;
+use no_llm_api::models::ModelCatalogue;
 use no_llm_api::service::ChatService;
 use no_llm_api::tokenizer::load;
 use tokio::net::TcpListener;
@@ -35,7 +36,16 @@ async fn main() -> Result<()> {
             ))
         }
     };
-    let app = build_router(service.clone());
+    let catalogue = ModelCatalogue::resolve(
+        settings.models.path.as_deref(),
+        settings.models.ids.as_deref(),
+    );
+    tracing::info!(
+        target: "no_llm_api",
+        models = catalogue.ids().count(),
+        "model catalogue resolved"
+    );
+    let (app, _cancels) = build_router_with_options(service.clone(), catalogue, &settings.cors);
     let listener = TcpListener::bind(settings.bind_address).await?;
     tracing::info!(target: "no_llm_api", "listening on {}", settings.bind_address);
     axum::serve(listener, app).await?;

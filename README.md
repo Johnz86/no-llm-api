@@ -22,6 +22,9 @@ Environment variables control runtime behaviour:
 | `DATASET_SOURCE` | `parquet` (deterministic fixtures) or `live` (proxy real OpenAI/Azure). | `parquet` |
 | `DATASET_PATH` | Path to the parquet fixture to load (and optionally append to). | `data/conversations.parquet` |
 | `TOKENIZER_MODEL` | Tokenizer preset loaded via `tiktoken-rs` (`cl100k_base`, `o200k_base`, `p50k_base`, `p50k_edit`, `r50k_base`). | `cl100k_base` |
+| `MODELS_PATH` | JSON catalogue backing `GET /models`. Accepts a bare array or `{ "data": [...] }`. | `data/models.json` when present |
+| `MODELS` | Comma-separated model ids; used when no catalogue file is available. | built-in list |
+| `NO_LLM_CORS_ORIGINS` | `*` mirrors the request `Origin`; otherwise a comma-separated allow-list. | `*` |
 | `LIVE_RECORD` | `true`/`1` to persist live completions into a parquet file. | `false` |
 | `LIVE_RECORD_PATH` | Output parquet when recording live sessions (falls back to `DATASET_PATH`). | - |
 
@@ -88,19 +91,32 @@ The server mirrors the primary Chat Completions endpoints, exposed both at the r
 - `POST /chat/completions/{completion_id}`
 - `DELETE /chat/completions/{completion_id}`
 - `GET /chat/completions/{completion_id}/messages`
+- `GET /models`
+- `GET /models/{model_id}`
+
+Plus two unversioned routes: `GET /` serves the bundled test page (embedded in the binary, so it works
+from any working directory) and `GET /health` reports liveness without touching the dataset.
 
 Responses include usage data, tool/function call metadata, finish reasons, audio attachments, and refusal text when available.
 
+Errors always use the spec envelope with all four members present, including explicit nulls, because
+clients read `code` and `param` straight off the body:
+
+```json
+{ "error": { "message": "...", "type": "invalid_request_error", "param": null, "code": null } }
+```
+
+Every response carries `x-request-id`; a caller-supplied value is echoed back. CORS mirrors the request
+origin and the requested headers, so SDK-specific headers never need an allow-list update.
+
 ## Testing
 
-- `cargo test` exercises dataset helpers, service logic, and store behaviour.
-- Async-openai compatibility tests are opt-in to avoid external dependencies. Set the environment variable before running:
-
-  ```bash
-  ASYNC_OPENAI_COMPAT=1 cargo test tests::async_openai -- --nocapture
-  ```
-
-  The suite spins up the Axum server in-process, drives it with async-openai (non-streamed, streamed with usage, and tool-call scenarios), and asserts that the client deserialises responses without warnings.
+- `cargo test` exercises dataset helpers, service logic, store behaviour, the HTTP surface
+  (`tests/http_api.rs`), the SSE transcript contract (`tests/sse.rs`) and the async-openai client
+  contract (`tests/async_openai.rs`). No environment variables and no network access are required.
+- `tests/support/sse.rs` is the shared transcript parser and assertion harness: exactly one trailing
+  `[DONE]`, one `finish_reason` on the last chunk carrying a choice, stable chunk ids, usage-frame
+  position, and median inter-frame pacing.
 
 ## Notes
 

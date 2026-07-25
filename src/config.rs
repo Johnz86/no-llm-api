@@ -12,6 +12,29 @@ pub struct Settings {
     pub tokens_per_second: NonZeroU32,
     pub dataset: DatasetSettings,
     pub tokenizer: TokenizerSettings,
+    pub models: ModelSettings,
+    pub cors: CorsSettings,
+}
+
+/// Where the model catalogue comes from, in precedence order.
+#[derive(Debug, Clone, Default)]
+pub struct ModelSettings {
+    pub path: Option<PathBuf>,
+    pub ids: Option<Vec<String>>,
+}
+
+/// Which origins the browser-facing CORS layer accepts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CorsSettings {
+    /// Mirror whatever `Origin` the browser sent.
+    MirrorAny,
+    List(Vec<String>),
+}
+
+impl Default for CorsSettings {
+    fn default() -> Self {
+        Self::MirrorAny
+    }
 }
 
 /// Describes how the service should source conversation data.
@@ -95,6 +118,40 @@ impl Settings {
             tokenizer: TokenizerSettings {
                 preset: tokenizer_preset,
             },
+            models: Self::load_models(),
+            cors: Self::load_cors(),
         })
+    }
+
+    fn load_models() -> ModelSettings {
+        let path = env::var("MODELS_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| {
+                let default = PathBuf::from("data/models.json");
+                default.exists().then_some(default)
+            })
+            .filter(|path| path.exists());
+        let ids = env::var("MODELS").ok().map(|raw| {
+            raw.split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .collect()
+        });
+        ModelSettings { path, ids }
+    }
+
+    fn load_cors() -> CorsSettings {
+        match env::var("NO_LLM_CORS_ORIGINS") {
+            Ok(raw) if raw.trim() != "*" && !raw.trim().is_empty() => CorsSettings::List(
+                raw.split(',')
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+            ),
+            _ => CorsSettings::MirrorAny,
+        }
     }
 }

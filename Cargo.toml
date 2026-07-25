@@ -41,9 +41,10 @@ dotenvy = "0.15.7"
 indexmap = "2.14.0"
 once_cell = "1.21.4"
 tiktoken-rs = "0.12.0"
-async-openai = { version = "0.41.1", features = ["chat-completion"] }
+async-openai = { version = "0.41.1", features = ["chat-completion", "model"] }
 clap = { version = "4.6.4", features = ["derive"] }
 async-stream = "0.3.6"
+tower-http = { version = "0.7.0", features = ["cors"] }
 
 [dev-dependencies]
 axum = { version = "0.8.9", features = ["macros", "json", "tokio"] }

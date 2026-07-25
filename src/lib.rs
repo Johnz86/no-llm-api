@@ -3,6 +3,7 @@ pub mod dataset;
 pub mod http;
 pub mod live;
 pub mod model;
+pub mod models;
 pub mod service;
 pub mod sim;
 pub mod store;

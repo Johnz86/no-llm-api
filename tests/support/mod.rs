@@ -92,3 +92,77 @@ pub fn stream_body(prompt: &str) -> serde_json::Value {
         "messages": [{ "role": "user", "content": prompt }]
     })
 }
+
+/// A minimal non-streamed chat request body.
+pub fn body(prompt: &str) -> serde_json::Value {
+    serde_json::json!({
+        "model": "gpt-4o-mini",
+        "messages": [{ "role": "user", "content": prompt }]
+    })
+}
+
+/// One request against the in-process router, returning status, headers and body text.
+pub async fn send(
+    app: axum::Router,
+    method: &str,
+    uri: &str,
+    body: Option<serde_json::Value>,
+) -> (axum::http::StatusCode, axum::http::HeaderMap, String) {
+    send_raw(app, method, uri, body.map(|value| value.to_string()), true).await
+}
+
+pub async fn send_raw(
+    app: axum::Router,
+    method: &str,
+    uri: &str,
+    body: Option<String>,
+    json_content_type: bool,
+) -> (axum::http::StatusCode, axum::http::HeaderMap, String) {
+    use axum::body::Body;
+    use axum::http::Request;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    let mut builder = Request::builder().method(method).uri(uri);
+    if body.is_some() && json_content_type {
+        builder = builder.header("content-type", "application/json");
+    }
+    let request = builder
+        .body(body.map(Body::from).unwrap_or_else(Body::empty))
+        .expect("request");
+
+    let response = app.oneshot(request).await.expect("router call");
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
+    (
+        status,
+        headers,
+        String::from_utf8_lossy(&bytes).into_owned(),
+    )
+}
+
+/// Parses a response body and asserts it is a spec-shaped error envelope.
+pub fn assert_error_envelope(text: &str) -> serde_json::Value {
+    let value: serde_json::Value =
+        serde_json::from_str(text).unwrap_or_else(|error| panic!("not JSON ({error}): {text}"));
+    let error = value
+        .get("error")
+        .unwrap_or_else(|| panic!("no error member: {text}"));
+    for key in ["message", "type", "param", "code"] {
+        assert!(
+            error.get(key).is_some(),
+            "error envelope is missing '{key}': {text}"
+        );
+    }
+    assert!(
+        error["message"].as_str().is_some_and(|m| !m.is_empty()),
+        "error message must be non-empty: {text}"
+    );
+    value
+}

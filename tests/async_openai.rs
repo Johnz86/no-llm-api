@@ -18,18 +18,8 @@ use no_llm_api::tokenizer::load;
 use tempfile::tempdir;
 use tokio::net::TcpListener;
 
-const ENV_FLAG: &str = "ASYNC_OPENAI_COMPAT";
-
 #[tokio::test]
 async fn async_openai_compatibility() -> anyhow::Result<()> {
-    if std::env::var(ENV_FLAG).is_err() {
-        eprintln!(
-            "skipping async-openai compatibility test; set {}=1 to enable",
-            ENV_FLAG
-        );
-        return Ok(());
-    }
-
     let tmp = tempdir()?;
     let dataset_path = tmp.path().join("sample.parquet");
     ensure_sample_dataset(&dataset_path)?;
@@ -102,6 +92,17 @@ async fn async_openai_compatibility() -> anyhow::Result<()> {
         .and_then(|choice| choice.finish_reason.clone())
         .unwrap_or(FinishReason::Stop);
     assert_eq!(finish, FinishReason::ToolCalls);
+
+    // Model discovery: three of five surveyed GUIs cannot reach chat without this.
+    let models = client.models().list().await?;
+    assert_eq!(models.object, "list");
+    assert!(
+        !models.data.is_empty(),
+        "the catalogue must never be empty by default"
+    );
+    let first = models.data[0].id.clone();
+    let single = client.models().retrieve(&first).await?;
+    assert_eq!(single.id, first);
 
     let _ = tx.send(());
     Ok(())
