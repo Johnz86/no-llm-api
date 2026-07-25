@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+  # Never set OPENAI_* / AZURE_OPENAI_* / DATASET_SOURCE here: the mock must stay offline in CI.
+  NO_LLM_API_LIVE: ""
+  INSTA_UPDATE: "no"
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked --all-targets
+      - run: cargo test --locked --all-targets
+      - run: cargo test --locked --doc
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories bans licenses sources
+
+  fresh-clone:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Reject path dependencies
+        run: |
+          if grep -nE '^[[:space:]]*[A-Za-z0-9_-]+[[:space:]]*=.*\bpath[[:space:]]*=' Cargo.toml; then
+            echo "path dependency found in Cargo.toml"; exit 1
+          fi
+          if grep -n 'source = "path' Cargo.lock; then
+            echo "path dependency found in Cargo.lock"; exit 1
+          fi
+      - name: Build from a pristine clone
+        run: |
+          git clone --depth 1 "file://$PWD" /tmp/fresh
+          cd /tmp/fresh
+          test ! -d async-openai && test ! -d openai-func-enums
+          cargo build --locked --all-targets
+          cargo test --locked --all-targets
