@@ -1,21 +1,21 @@
 # 01 - API Surface Gap Analysis
 
-Scope: field-by-field / endpoint-by-endpoint diff of this repo against (a) `openapi.documented.yml`
-(bundled OpenAI spec) and (b) `async-openai` 0.41.1 types. Planning only.
+Scope: field-by-field / endpoint-by-endpoint diff of this repo against (a) the tracked OpenAI spec
+`openapi.yaml` and (b) `async-openai` 0.41.1 types. Planning only.
 
 Reference shorthand used below:
 
 | Alias | Path |
 | --- | --- |
-| `SPEC` | `C:\GIT\rust\no-llm-api\openapi.documented.yml` (line numbers verified this session) |
+| `SPEC` | `openapi.yaml` at the repo root. Line numbers were re-anchored to upstream commit `5c044be3bf3a` (2026-07-23); see `openapi.provenance.json` and `docs/spec/upstream-openapi.md`. Refreshing the spec invalidates them - re-run `scripts/fetch-openapi.ps1 -Check` before trusting a line number, and fall back to the schema name, which is always given nearby. |
 | `AO` | `%USERPROFILE%\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\async-openai-0.41.1\src` |
 | `AO_CHAT` | `AO\types\chat\chat_.rs` |
 
-Anchors: `SPEC:33702` CreateChatCompletionRequest, `SPEC:34021` CreateChatCompletionResponse,
-`SPEC:34156` CreateChatCompletionStreamResponse, `SPEC:32480` ChatCompletionResponseMessage,
-`SPEC:32635` ChatCompletionStreamResponseDelta, `SPEC:31932` ChatCompletionMessageToolCallChunk,
-`SPEC:32607` ChatCompletionStreamOptions, `SPEC:37977` Error, `SPEC:38015` ErrorResponse,
-`SPEC:42204` ListModelsResponse, `SPEC:43486` Model, `SPEC:57403` ServiceTier.
+Anchors: `SPEC:32658` CreateChatCompletionRequest, `SPEC:33058` CreateChatCompletionResponse,
+`SPEC:33214` CreateChatCompletionStreamResponse, `SPEC:31208` ChatCompletionResponseMessage,
+`SPEC:31398` ChatCompletionStreamResponseDelta, `SPEC:30619` ChatCompletionMessageToolCallChunk,
+`SPEC:31344` ChatCompletionStreamOptions, `SPEC:37735` Error, `SPEC:37772` ErrorResponse,
+`SPEC:42437` ListModelsResponse, `SPEC:43830` Model, `SPEC:61410` ServiceTier.
 `AO_CHAT:745` CreateChatCompletionRequest, `:1080` CreateChatCompletionResponse,
 `:1178` CreateChatCompletionStreamResponse, `:439` ChatCompletionResponseMessage,
 `:1140` ChatCompletionStreamResponseDelta, `:1123` ChatCompletionMessageToolCallChunk,
@@ -39,7 +39,7 @@ its intent - the worst failure mode for a test harness.
 | `verbosity` | `Verbosity` (`AO_CHAT:663`) | low |
 | `prompt_cache_key`, `safety_identifier` | `Option<String>` | low, but they replace `user`; trivial to accept |
 | `functions` (deprecated) | `Vec<ChatCompletionFunctions>` | low: legacy GUIs still send it |
-| `stream_options.include_obfuscation` | `SPEC:32624`, `AO_CHAT:1000` | must be *accepted* (currently ignored, which is acceptable behaviour, but see 3.6) |
+| `stream_options.include_obfuscation` | `SPEC:31375`, `AO_CHAT:1000` | must be *accepted* (currently ignored, which is acceptable behaviour, but see 3.6) |
 | `tool_call_id` on messages | required on `ChatCompletionRequestToolMessage` | HIGH: tool-result round-trips lose the call linkage entirely (`src/model.rs:55-70` has no such field) |
 
 ### 1.2 Wrongly typed / `Value`-shaped where a typed enum is required
@@ -56,7 +56,7 @@ successful. Each row below is a validation gap, not only a typing nit.
 | `audio` (`:124`) | `Value` | `{voice, format}` enums (`AO_CHAT` ChatCompletionAudio) | |
 | `modalities` (`:118`) | `Vec<String>` | `[text\|audio]` enum | |
 | `reasoning_effort` (`:98`) | `String` | `none\|minimal\|low\|medium\|high\|xhigh` (`AO\types\shared\reasoning_effort.rs:5`) | |
-| `service_tier` (`:100`) | `String` | `auto\|default\|flex\|scale\|priority` (`SPEC:57403`) | echoed to response -> breaks typed clients (see 2.2) |
+| `service_tier` (`:100`) | `String` | `auto\|default\|flex\|scale\|priority` (`SPEC:61410`) | echoed to response -> breaks typed clients (see 2.2) |
 | `logit_bias` (`:106`) | `Map<String,Value>` | `HashMap<String,i8>` (-100..100) | |
 | `seed` (`:108`) | `u64` | spec/AO `i64` | negative seed currently 400s where OpenAI accepts |
 | `stream` (`:82`) | `bool` (non-nullable) | nullable in spec | literal `"stream": null` currently 400s |
@@ -78,7 +78,7 @@ error banner without these.
 
 ### 2.1 Non-spec fields emitted on `POST /chat/completions`
 
-`SPEC:34021` allows exactly `id, choices, created, model, service_tier, system_fingerprint,
+`SPEC:33058` allows exactly `id, choices, created, model, service_tier, system_fingerprint,
 object, usage`. `AO_CHAT:1080` matches that. The repo additionally emits 16 fields, all
 `#[serde(default)]` with no `skip_serializing_if`, so they appear as explicit `null`s:
 
@@ -92,7 +92,7 @@ Two distinct problems:
    are echoed straight back from the request (`service.rs:243-252`). Nothing in OpenAI does this.
    `async-openai` tolerates unknown keys (no `deny_unknown_fields`), but a strict client
    (Go `DisallowUnknownFields`, JSON-Schema validation in a GUI test suite) rejects the body.
-2. Wrong endpoint: `SPEC:3068-3100` (the `listChatCompletions` example) shows that the *stored*
+2. Wrong endpoint: `SPEC:2061-2092` (the `listChatCompletions` example) shows that the *stored*
    completion object returned by GET/list legitimately carries `request_id, tool_choice, seed,
    top_p, temperature, presence_penalty, frequency_penalty, service_tier, tools, metadata,
    response_format, input_user`. So these fields belong on `GET /chat/completions{,/{id}}` only -
@@ -105,17 +105,17 @@ Correct split: lean object from POST; enriched object from GET/list.
 | Item | Evidence | Impact |
 | --- | --- | --- |
 | `message.content` can serialize as a JSON **array** | fixtures with `content_parts` become `MessageContent::Parts` (`dataset.rs:297-301`) and flow unchanged into the response message (`service.rs:196-211`) | HARD BREAK: `AO_CHAT:439` declares `content: Option<String>`; any parts-bearing fixture makes every typed client fail to parse |
-| `message.annotations` missing | `SPEC:32497` | GUIs that render web-search citations show nothing |
+| `message.annotations` missing | `SPEC:31225` | GUIs that render web-search citations show nothing |
 | tool-call nulls | `model.rs:369-375` has `id/type/function` all `Option` | `AO_CHAT:384` needs `id: String`, tag `type`, `function{name,arguments}` both `String`; a partial fixture emits `"type": null` and breaks the internally-tagged enum. Current sample fixture happens to be complete (`dataset.rs:782`), which is why the compat test passes |
 | `service_tier` always `"default"` | `service.rs:226-229` | spec: present only when the request set it; and the value is an unvalidated echo of the request string |
 | `system_fingerprint` = `"fp_mock"` | `service.rs:239` | real format is `fp_<10 hex>`; GUIs that display or diff fingerprints see an unrealistic value |
 | `logprobs` always `null` | `service.rs:216` | `logprobs: true` cannot be tested |
 | `role` may be `developer` | `ChatRole` (`model.rs:7-15`) vs `AO_CHAT:79` `Role` (no `Developer`) | listing messages of a conversation that used a developer message breaks the reference client |
-| `/messages` items lack `content_parts` | `AO_CHAT:1238`, `SPEC` example at `SPEC:4776-4784` | spec puts the array in `content_parts` and the flattened string in `content`; repo stuffs the array into `content` and adds a non-spec `name` at top level (`model.rs:307-322`) - `name: null` does appear in the OpenAI example, so `name` is fine; the `content`/`content_parts` split is not |
+| `/messages` items lack `content_parts` | `AO_CHAT:1238`, `SPEC` example at `SPEC:3325-3333` | spec puts the array in `content_parts` and the flattened string in `content`; repo stuffs the array into `content` and adds a non-spec `name` at top level (`model.rs:307-322`) - `name: null` does appear in the OpenAI example, so `name` is fine; the `content`/`content_parts` split is not |
 
 Correct by construction today: `object`, `created`, `choices[].index`, `finish_reason` enum values,
 `usage` + `prompt_tokens_details` / `completion_tokens_details`, `logprobs: null` present rather
-than omitted (`SPEC:34032` requires the key), and the `ChatCompletionList` / `ChatCompletionDeleted`
+than omitted (`SPEC:33071` requires the key), and the `ChatCompletionList` / `ChatCompletionDeleted`
 envelopes.
 
 ---
@@ -124,12 +124,12 @@ envelopes.
 
 | # | OpenAI behaviour | Repo behaviour | Verdict |
 | --- | --- | --- | --- |
-| 3.1 | First chunk is role-only: `delta:{"role":"assistant","content":""}`, then content chunks (`SPEC:34272` example) | role folded into the first *content* chunk (`routes.rs:135-140`, `delta_for_text(.., index == 0)` at `service.rs:428`) | cosmetic for most GUIs; fix while touching this code |
-| 3.2 | Tool calls stream as `ChatCompletionMessageToolCallChunk`: `index` **required** (`SPEC:31959`, `AO_CHAT:1123` `pub index: u32`), `id`+`type` only on the first fragment, `function.arguments` split across chunks | one final chunk carrying the whole `ChatCompletionMessageToolCall` with **no `index`** (`routes.rs:187`) | HARD BREAK: `serde` reports missing field `index`; `async-openai` stream parsing fails. Unexercised because `tests/async_openai.rs:87-101` only tests tool calls non-streamed |
+| 3.1 | First chunk is role-only: `delta:{"role":"assistant","content":""}`, then content chunks (`SPEC:33353` example) | role folded into the first *content* chunk (`routes.rs:135-140`, `delta_for_text(.., index == 0)` at `service.rs:428`) | cosmetic for most GUIs; fix while touching this code |
+| 3.2 | Tool calls stream as `ChatCompletionMessageToolCallChunk`: `index` **required** (`SPEC:30647`, `AO_CHAT:1123` `pub index: u32`), `id`+`type` only on the first fragment, `function.arguments` split across chunks | one final chunk carrying the whole `ChatCompletionMessageToolCall` with **no `index`** (`routes.rs:187`) | HARD BREAK: `serde` reports missing field `index`; `async-openai` stream parsing fails. Unexercised because `tests/async_openai.rs:87-101` only tests tool calls non-streamed |
 | 3.3 | `refusal` arrives as incremental deltas | whole refusal attached to the final chunk (`routes.rs:185`) | GUI refusal panels never animate; low-med |
-| 3.4 | Final chunk is `delta:{}` + `finish_reason` (`SPEC:34285`) | final chunk may also carry content / tool_calls / refusal / audio (`routes.rs:170-190`) | med: double-render risk in GUIs that append every delta |
-| 3.5 | Chunk has `service_tier` (`SPEC:34232`); delta has no `audio` field (`SPEC:32635-32677`) | chunk lacks `service_tier` (`model.rs:331-341`); delta emits `audio` (`model.rs:366`) | low both ways; `Option` fields make AO tolerant |
-| 3.6 | `obfuscation` is **not** part of the documented chunk schema (in this spec it appears only on Realtime/Responses delta events, e.g. `SPEC:46824`); only the request flag `stream_options.include_obfuscation` is documented (`SPEC:32624`) | flag ignored, field not emitted | acceptable as-is. Do not invent an `obfuscation` field; optionally add it behind a config flag for GUIs that were written against live traffic |
+| 3.4 | Final chunk is `delta:{}` + `finish_reason` (`SPEC:33359`) | final chunk may also carry content / tool_calls / refusal / audio (`routes.rs:170-190`) | med: double-render risk in GUIs that append every delta |
+| 3.5 | Chunk has `service_tier` (`SPEC:33294`); delta has no `audio` field (`SPEC:31398-31440`) | chunk lacks `service_tier` (`model.rs:331-341`); delta emits `audio` (`model.rs:366`) | low both ways; `Option` fields make AO tolerant |
+| 3.6 | `obfuscation` is **not** part of the documented chunk schema (in this spec it appears only on Realtime/Responses delta events, e.g. `SPEC:48641`); only the request flag `stream_options.include_obfuscation` is documented (`SPEC:31375`) | flag ignored, field not emitted | acceptable as-is. Do not invent an `obfuscation` field; optionally add it behind a config flag for GUIs that were written against live traffic |
 | 3.7 | Usage chunk: `choices: []` + populated `usage`, sent immediately before `[DONE]`; other chunks carry `usage: null` | exactly that (`service.rs:450-460`, `routes.rs:196-207`) | correct |
 | 3.8 | Framing `data: {json}\n\n`, terminator `data: [DONE]\n\n` | axum `Event::json_data` + `.data("[DONE]")` (`routes.rs:207`) | correct |
 | 3.9 | No SSE keep-alive comments on chat completions | `: ping` comment every 15s (`routes.rs:210-216`) | med: naive hand-rolled GUI parsers that split on `data:` can mis-handle comment lines; make keep-alive opt-in |
@@ -140,7 +140,7 @@ envelopes.
 
 ## 4. Error envelope
 
-Required shape (`SPEC:37977` + `SPEC:38015`): `{"error":{"message":str,"type":str,"param":str|null,
+Required shape (`SPEC:37735` + `SPEC:37772`): `{"error":{"message":str,"type":str,"param":str|null,
 "code":str|null}}` with all four keys required. `async-openai`'s `ApiError`
 (`AO\error.rs:79`) has `message: String` plus `Option` for the rest, so it tolerates the repo's
 two-field body - but GUIs that surface `code` see `undefined`.
@@ -180,12 +180,12 @@ status/type/code mapping.
 
 | Endpoint | Spec | Verdict |
 | --- | --- | --- |
-| `GET /v1/models` | `SPEC:13065` -> `ListModelsResponse` `{object:"list",data:[Model]}` (`SPEC:42204`, `AO\types\models\model.rs:17`) | **In scope, highest endpoint value.** Model pickers in Open WebUI / LibreChat / Chatbox-style GUIs populate from here; without it they show an empty dropdown or refuse to start |
-| `GET /v1/models/{model}` | `SPEC:13194` -> `Model` `{id,object:"model",created,owned_by}` (`SPEC:43486`) | **In scope, trivial once the list exists**; unknown id must be 404 `model_not_found` |
+| `GET /v1/models` | `SPEC:8658` -> `ListModelsResponse` `{object:"list",data:[Model]}` (`SPEC:42437`, `AO\types\models\model.rs:17`) | **In scope, highest endpoint value.** Model pickers in Open WebUI / LibreChat / Chatbox-style GUIs populate from here; without it they show an empty dropdown or refuse to start |
+| `GET /v1/models/{model}` | `SPEC:8735` -> `Model` `{id,object:"model",created,owned_by}` (`SPEC:43830`) | **In scope, trivial once the list exists**; unknown id must be 404 `model_not_found` |
 | `GET /health` (non-OpenAI) | - | **In scope**: needed by docker/compose healthchecks and CI wait-loops |
-| `POST /v1/responses` | `SPEC:18339` | **Out of short-term scope.** Its streaming surface is dozens of typed events (`response.output_text.delta`, `response.function_call_arguments.delta`, ...) - a multi-week port with its own state model. Only newer GUIs default to it, and most still support Chat Completions. Revisit only if a target GUI is Responses-only |
-| `POST /v1/embeddings` | `SPEC:6999` | **Optional S.** Deterministic pseudo-vector (hash -> normalized floats) is ~60 lines and unblocks GUIs with local RAG/"memory" features. Not needed for chat testing; do it only if a target GUI calls it at startup |
-| `POST /v1/moderations` | `SPEC:13429` | **Optional S.** Some GUIs pre-flight user input. Static "not flagged" response with all category scores 0 is cheap |
+| `POST /v1/responses` | `SPEC:17087` | **Out of short-term scope.** Its streaming surface is dozens of typed events (`response.output_text.delta`, `response.function_call_arguments.delta`, ...) - a multi-week port with its own state model. Only newer GUIs default to it, and most still support Chat Completions. Revisit only if a target GUI is Responses-only |
+| `POST /v1/embeddings` | `SPEC:4418` | **Optional S.** Deterministic pseudo-vector (hash -> normalized floats) is ~60 lines and unblocks GUIs with local RAG/"memory" features. Not needed for chat testing; do it only if a target GUI calls it at startup |
+| `POST /v1/moderations` | `SPEC:8874` | **Optional S.** Some GUIs pre-flight user input. Static "not flagged" response with all category scores 0 is cheap |
 | `/v1/audio/*` | speech/transcription | **Out of scope.** Requires multipart upload and binary audio bodies; only voice UIs need it |
 
 For everything deliberately unimplemented, return a 501 (or 404) with a *proper error envelope*
@@ -274,7 +274,7 @@ test in `tests/` or a single command.
     `input_user`; drop `response_prefix`, `logit_bias`, `stream_options`, `audio`, `modalities`,
     `parallel_tool_calls` from all responses.
   - Why: removes request-state leakage and stops strict clients rejecting the create response;
-    aligns list/get with `SPEC:3068-3100`.
+    aligns list/get with `SPEC:2061-2092`.
   - Files: `src/model.rs`, `src/service.rs`, `src/store.rs`, `src/http/routes.rs`.
   - Effort: M
   - Acceptance: test asserts the POST body's top-level key set equals the spec set exactly, and

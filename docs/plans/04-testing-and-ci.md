@@ -56,7 +56,7 @@ Authored tests: 8 functions total.
 | `metadata[key]=value` query parsing | `src/http/routes.rs:297-337` | No | Hand-written `Deserialize` with `#[serde(flatten)]` + `deserialize_any`; highest-complexity untested code in the repo, and it degrades silently to "no filter". |
 | `order` validation -> 400 | `src/http/routes.rs:68-71,344-347` | No | |
 | 404 envelope | `src/http/routes.rs:389-397` | No | |
-| Error envelope shape | `src/http/routes.rs:379-387` | No | Emits only `message` + `type`. Spec `Error` requires `type,message,param,code` (`openapi.documented.yml:37977-37995`); `async-openai`'s `ApiError` (`async-openai/async-openai/src/error.rs:43-48`) tolerates missing `param`/`code`, other clients may not. |
+| Error envelope shape | `src/http/routes.rs:379-387` | No | Emits only `message` + `type`. Spec `Error` requires `type,message,param,code` (`openapi.yaml:37735-37753`); `async-openai`'s `ApiError` (`AO/error.rs:79-84`) tolerates missing `param`/`code`, other clients may not. |
 | Malformed JSON body | axum default | No | Returns axum's plain-text 422, not the OpenAI envelope. |
 | `GET /` index | `src/http/routes.rs:56-61` | No | Reads relative `index.html`, so behaviour depends on process cwd. |
 | Dataset round-trip (write -> read) | `src/dataset.rs:395-460`, `rows_from_interaction:616-664` | No | Only the bundled sample is read; nothing writes then reads back. |
@@ -109,8 +109,8 @@ Make it default-on. Evidence:
 - The test never touches the internet: it binds `127.0.0.1:0` (`tests/async_openai.rs:48`) and points
   `OpenAIConfig::with_api_base` at that loopback address (`tests/async_openai.rs:110-114`).
 - `async-openai` is a normal (non-optional) dependency (`Cargo.toml:44`) and defaults to `rustls`
-  (`async-openai/async-openai/Cargo.toml:16-18`), so no OpenSSL/system TLS is needed on Linux or Windows
-  runners.
+  (`async-openai-0.41.1/Cargo.toml`, `default = ["rustls"]`), so no OpenSSL/system TLS is needed on
+  Linux or Windows runners.
 - The current skip-on-missing-env pattern produces false green output, which is worse than no test.
 
 Keep exactly one opt-in gate, for live network paths only: `NO_LLM_API_LIVE=1` guarding tests that touch
@@ -118,7 +118,7 @@ Keep exactly one opt-in gate, for live network paths only: `NO_LLM_API_LIVE=1` g
 `tests/async_openai.rs:21` and `:25-32`.
 
 Caveat to encode in the test: `async-openai`'s client retries with backoff on server errors
-(`async-openai/async-openai/src/client.rs:348-390`). Do not use it to assert 4xx/5xx behaviour - use `oneshot`
+(`AO/client.rs:782-830`). Do not use it to assert 4xx/5xx behaviour - use `oneshot`
 or raw `reqwest` for error-path tests so failures are fast and deterministic.
 
 ### Browser E2E tool choice
@@ -210,7 +210,7 @@ Sources of churn today and the fix:
 | --- | --- | --- |
 | `id` (`chatcmpl-<uuid>`) | `src/service.rs:189` | Inject an id source. Add a test-only constructor (e.g. `ChatService::with_seed(u64)`) that produces `chatcmpl-test-0001`, `-0002`, ... from a counter. This is also the deterministic-seed feature the product needs, so it is not test-only scaffolding. |
 | `request_id` (`req_<uuid>`) | `src/service.rs:190` | Same id source. |
-| `created` | `unix_timestamp()`, `src/service.rs:188` and `:385` | Injectable clock; fixed `1_700_000_000` in tests. Note `async-openai` types `created` as `u32` (`async-openai/async-openai/src/types/chat.rs:958`), so keep the value positive and below 2^32. |
+| `created` | `unix_timestamp()`, `src/service.rs:188` and `:385` | Injectable clock; fixed `1_700_000_000` in tests. Note `async-openai` types `created` as `u32` (`AO/types/chat/chat_.rs:1086`), so keep the value positive and below 2^32. |
 | Rotation fallback answer | `src/service.rs:43-49` | Snapshot only prompts that match a script until seeded selection lands; then snapshot the seeded fallback too. |
 | Frame timing | harness | Never snapshot timestamps; `transcript_text()` omits them. Timing is asserted numerically, not by snapshot. |
 
@@ -219,7 +219,7 @@ Until the injectable id/clock exists, use insta redactions (`".id" => "[id]"`, `
 injection afterwards - redactions hide exactly the fields a GUI uses for message keys.
 
 Also snapshot-worthy: the error envelope for 404, invalid `order`, and malformed JSON. These lock in the
-`type,message,param,code` shape from `openapi.documented.yml:37977-37995`.
+`type,message,param,code` shape from `openapi.yaml:37735-37753`.
 
 ## 5. Fixture strategy
 
@@ -334,15 +334,15 @@ jobs:
 
 Notes:
 
-- The `fresh-clone` job is the guard for the vendored reference clones. `.gitignore:9-10,13` excludes
-  `/async-openai`, `/openai-func-enums` and `/openapi.documented.yml`, so a clone must build without them; the
-  `test ! -d` assertions make an accidental commit of those trees a hard failure.
+- The `fresh-clone` job is the guard against re-vendoring reference clones. Both were deleted and
+  `.gitignore` still excludes `/async-openai`, so the `test ! -d` assertions make an accidental commit
+  of those trees a hard failure.
 - `--locked` everywhere: dependencies were just bumped, so a silent lockfile update in CI would hide breakage.
 - `cargo-deny` over `cargo-audit`: it covers advisories plus license/source checks, and `sources` catches a
   dependency being repointed at a git or path source. Add a minimal `deny.toml` in the same change; start with
   `[advisories] yanked = "warn"` and no allow-list exceptions.
-- `async-openai` defaults to rustls (`async-openai/async-openai/Cargo.toml:16-18`), so no `apt-get install
-  libssl-dev` step is needed.
+- `async-openai` defaults to rustls (`async-openai-0.41.1/Cargo.toml`, `default = ["rustls"]`), so no
+  `apt-get install libssl-dev` step is needed.
 - Must NOT run in CI: anything with `DATASET_SOURCE=live` (`src/config.rs:60-79`) or the recorder binary's
   replay path, both of which call out to OpenAI/Azure using `OPENAI_*`/`AZURE_OPENAI_*`
   (`src/live.rs:99-105`). Gate: those tests are `#[ignore]`-annotated *and* early-return unless

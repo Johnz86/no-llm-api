@@ -20,8 +20,8 @@ Verified baseline for this plan:
 | Default build already links a full TLS/HTTP client stack | `Cargo.lock` contains `reqwest` (l.1696), `rustls` (l.1780), `hyper-rustls` (l.962), `ring` (l.1738), `secrecy` (l.1885); 293 packages total |
 | async-openai 0.41.1 can ship types without a client | registry `async-openai-0.41.1/Cargo.toml` `[features]`: `chat-completion-types` pulls only `derive_builder`+`bytes`, whereas `chat-completion = ["chat-completion-types", "_api"]` and `_api` pulls `reqwest`, `secrecy`, `tokio-util`, `url`, ... ; `rustls = ["dep:reqwest", "reqwest/rustls"]` |
 | `AGENTS.md` claim "tiktoken-rs already pulls in async-openai" is stale | registry `tiktoken-rs-0.12.0/Cargo.toml`: `async-openai = ["dep:async-openai"]`, dependency is `optional = true`, `default-features = false`, `features = ["chat-completion-types"]` |
-| `openapi.yaml` (1.31 MB) is tracked; `openapi.documented.yml` (2.21 MB) is ignored | `git ls-files` lists `openapi.yaml`; `.gitignore:14` |
-| Vendored clones are ignored and already version-skewed | `.gitignore:10-11`; `async-openai/async-openai/Cargo.toml` is `version = "0.30.1"` while we depend on 0.41.1 |
+| `openapi.yaml` is the only tracked spec, refreshed and provenance-recorded (RESOLVED) | `openapi.provenance.json`; `docs/spec/upstream-openapi.md` |
+| Vendored clones deleted (RESOLVED); reference is the cargo registry copy matching `Cargo.lock` | `AGENTS.md`, "Project Structure" and "Async-openai Compatibility Notes" |
 | No CI, no Dockerfile, no toolchain pin | `Test-Path .github` -> False, `Test-Path Dockerfile` -> False, `git ls-files rust-toolchain*` -> empty |
 | Cargo metadata is not publishable as-is | `Cargo.toml:1-4` has no `description`, `license`, `repository`, `rust-version` |
 
@@ -241,7 +241,7 @@ behind three separate gaps in this repo. Middleware order: `SetRequestId` (honou
 `x-request-id`, else UUID v4) -> `PropagateRequestId` (echo it back) -> `TraceLayer` with a
 custom `MakeSpan` carrying `request_id`, `method`, `path`, `model`, `stream`, `scenario`.
 Then feed the same id into the response body's `request_id` field (already part of the wire
-contract per `chat_completions_scope.md`, "ChatCompletion" section), so a screenshot of a broken
+contract per `docs/spec/chat-completions-scope.md`, "ChatCompletion" section), so a screenshot of a broken
 GUI response is enough to find its server-side span.
 
 Never log headers wholesale. `tower-http`'s default span does not include headers, which is the
@@ -441,44 +441,50 @@ endpoint variable is set - correct but undocumented precedence. Keys go straight
 
 ### Documentation set
 
+Status: the `GEMINI.md`, `task.md`, `chat_completions_scope.md` and `AGENTS.md` rows below all
+landed in the cleanup commit. The README rows are still open.
+
 | File | Today | Decision |
 | --- | --- | --- |
 | `README.md` | user-facing, accurate, has the env table | **Canonical user doc.** Add CLI/`--help` output, scenarios, Docker, health routes. Keep the env table generated-checked by the test proposed in section 1. |
-| `AGENTS.md` | contributor + agent conventions, mostly accurate | **Canonical contributor doc.** Fix the stale "tiktoken-rs already pulls in async-openai" claim (`AGENTS.md`, "Async-openai Compatibility Notes") - tiktoken-rs 0.12 makes it optional and off by default. Also fix "there is no standalone `tests/` directory": `tests/async_openai.rs` exists. Add the feature matrix and the doc-ownership table. |
-| `GEMINI.md` | duplicates README/AGENTS and is wrong in two places: it says `store` "handles the data storage and retrieval from Parquet files" (it is the in-memory `CompletionStore`) and that `openapi.yaml` is this project's API definition (it is the upstream OpenAI spec copy) | **Delete**, replace with a 3-line pointer to `AGENTS.md` if a Gemini-specific entry point is required. Two agent-instruction files with divergent architecture descriptions is a net negative. |
-| `task.md` | a work order whose deliverables have all shipped (rich dataset, recorder, live mode, e2e tests) | **Move to `docs/history/2025-10-rich-dataset-and-e2e.md`** or delete. It currently reads as pending work. |
-| `chat_completions_scope.md` | the best artefact in the repo: a distilled wire contract | **Promote to `docs/spec/chat-completions-scope.md`**, add a header line recording which upstream spec revision it was distilled from, and make it the reference the wire-shape plans cite. |
-| `docs/plans/*` | new | Plans 01-05; add `docs/plans/README.md` as the index once all five exist. |
+| `AGENTS.md` | contributor + agent conventions | **DONE.** Canonical contributor doc. The stale "tiktoken-rs already pulls in async-openai" and "there is no standalone `tests/` directory" claims were corrected, and the spec-refresh convention added. Feature matrix and doc-ownership table still open. |
+| `GEMINI.md` | duplicated README/AGENTS and was wrong in two places: it said `store` "handles the data storage and retrieval from Parquet files" (it is the in-memory `CompletionStore`) and that `openapi.yaml` is this project's API definition (it is the upstream OpenAI spec copy) | **DONE - deleted.** Two agent-instruction files with divergent architecture descriptions is a net negative. |
+| `task.md` | a work order whose deliverables had all shipped (rich dataset, recorder, live mode, e2e tests) | **DONE - deleted.** It read as pending work; git history retains it. |
+| `chat_completions_scope.md` | the best artefact in the repo: a distilled wire contract | **DONE - moved to `docs/spec/chat-completions-scope.md`.** Still wanted: a header line recording which upstream spec revision it was distilled from. |
+| `docs/plans/*` | plans 01-05 plus the `00-roadmap.md` synthesis | **DONE - `docs/README.md` is the index.** |
 
-### The two OpenAPI copies
+### The OpenAPI copies
 
-`openapi.yaml` (1,376,003 bytes) is tracked, `openapi.documented.yml` (2,319,923 bytes) is
-ignored (`.gitignore:14`), and `async-openai/openapi.yaml` (832,441 bytes) is a third copy
-inside the ignored clone. Recommendation:
+Status: `openapi.yaml` is now the current upstream spec (2,827,615 bytes, OpenAPI 3.1.0, upstream
+commit `5c044be3bf3a`), fetched and provenance-recorded by `scripts/fetch-openapi.ps1` / `.sh`;
+`openapi.documented.yml` and the third copy inside the vendored clone are both gone. What remains
+open is the size of the tracked copy:
 
 1. Generate `docs/spec/chat-completions.openapi.yaml`: the chat-completion paths plus their
    transitively referenced schemas only, expected well under 150 KB. Track that. It is the part
    we actually assert against, it diffs readably in review, and it keeps offline determinism.
-2. Untrack the full `openapi.yaml`, ignore both full files, and add
-   `scripts/fetch-openapi.ps1` / `.sh` that downloads a pinned revision of
-   `openai/openai-openapi` and verifies a recorded `sha256`. Record URL + revision + hash in
-   `docs/spec/README.md`.
-3. Note in `AGENTS.md` that the full files are grep targets only, never to be read whole.
+2. **DONE.** `scripts/fetch-openapi.ps1` / `.sh` download the spec, record URL, upstream commit,
+   date and `sha256` in `openapi.provenance.json`, and offer a `-Check` mode that exits non-zero
+   when the local copy is behind upstream. Process documented in `docs/spec/upstream-openapi.md`.
+   Still open: untracking the full copy once (1) exists.
+3. **DONE.** `AGENTS.md` records that `openapi.yaml` is upstream reference material, is a grep
+   target only, and must never be hand-edited.
 
-History rewrite to purge the 1.3 MB blob is not worth it for a repo this young; removing it from
+History rewrite to purge the old 1.3 MB blob is not worth it for a repo this young; replacing it in
 HEAD is enough to keep clones and the crates.io tarball small.
 
 ### Vendored upstream clones
 
-`async-openai/` and `openai-func-enums/` are ignored (`.gitignore:10-11`) but present.
-`async-openai/async-openai/Cargo.toml` is version 0.30.1 while `Cargo.toml:43` depends on
-0.41.1 - reading the clone to learn what the client expects is now actively misleading, which is
-exactly the kind of drift a reference copy is supposed to prevent. Decisions: keep an
-async-openai reference but pin it (`scripts/vendor-refs.ps1` doing
-`git clone --depth 1 --branch v0.41.1`), and prefer
-`~/.cargo/registry/src/*/async-openai-0.41.1/` which is guaranteed to match the lockfile;
-drop `openai-func-enums/` (no code path references it). Document both in `AGENTS.md` so the next
-agent knows the registry path is the source of truth.
+**DONE - both deleted.** `async-openai/` (48.6 MB, pinned at 0.30.1 while `Cargo.toml` depends on
+0.41.1) and `openai-func-enums/` (1.1 MB, referenced by no code path) were removed. Reading a clone
+that drifts from the lockfile to learn what the client expects is actively misleading, which is
+exactly the kind of drift a reference copy is supposed to prevent. `AGENTS.md` now points at
+`~/.cargo/registry/src/*/async-openai-0.41.1/`, which is guaranteed to match `Cargo.lock`.
+
+Superseded detail from the original recommendation, kept for the reasoning: a pinned shallow clone
+(`git clone --depth 1 --branch v0.41.1`) would also have worked, but the registry path costs nothing
+to keep in sync. `AGENTS.md` records that the registry path is the source of truth so the next agent
+does not re-vendor.
 
 ---
 
@@ -530,7 +536,7 @@ Ranked by value per hour for cheap, deterministic GUI testing.
 | 8 | `docker-compose.yml` (Open WebUI) + `docker-compose.demo.yml` (bundled `index.html`) + README walkthrough | Proves the mock against a real third-party GUI, which is the actual acceptance test of API shape | `docker-compose*.yml`, `README.md` | S | `docker compose up` then the GUI lists models from `/v1/models` and streams a reply (depends on plan 01/02 for `/v1/models`) |
 | 9 | CI workflow: fmt, `clippy -D warnings`, `cargo test`, `cargo test --no-default-features`, `ASYNC_OPENAI_COMPAT=1 cargo test`, `docker build`, `rust-toolchain.toml` pinning 1.90 | `AGENTS.md` already treats clippy warnings as merge blockers; nothing enforces it today | `.github/workflows/ci.yml`, `rust-toolchain.toml` | S | workflow green on a PR; a deliberate `clippy` warning fails the run |
 | 10 | Live-mode redaction pass + `data/live/` default + log-hygiene tests + credential move into `Settings` | Recorded fixtures are committed; a leaked key or customer prompt is permanent | `src/live.rs`, `src/dataset.rs`, `src/bin/recorder.rs`, `src/config.rs`, `.gitignore` | M | unit test records an interaction containing a fake key and asserts `[REDACTED]` in the parquet round-trip and absence of the key in logs |
-| 11 | Doc reconciliation: delete `GEMINI.md`, archive `task.md`, promote `chat_completions_scope.md` to `docs/spec/`, fix the two stale `AGENTS.md` claims, README env/CLI table + drift test | Contradictory instruction files actively mislead both humans and agents | `GEMINI.md`, `task.md`, `chat_completions_scope.md`, `AGENTS.md`, `README.md`, `docs/` | S | repo has one contributor doc and one user doc; test fails when a flag is missing from the README table |
+| 11 | Doc reconciliation: ~~delete `GEMINI.md`~~, ~~delete `task.md`~~, ~~promote `chat_completions_scope.md` to `docs/spec/`~~, ~~fix the two stale `AGENTS.md` claims~~, README env/CLI table + drift test (only the README table remains) | Contradictory instruction files actively mislead both humans and agents | `README.md`, `docs/` | S | repo has one contributor doc and one user doc; test fails when a flag is missing from the README table |
 | 12 | OpenAPI slimming: track a pruned chat-completions extract, untrack `openapi.yaml`, add `scripts/fetch-openapi.*` with a pinned sha256; `scripts/vendor-refs.*`, drop `openai-func-enums/` | 1.3 MB of unreviewable YAML in every clone and in any crates.io tarball; the vendored clone is already version-skewed (0.30.1 vs 0.41.1) | `.gitignore`, `docs/spec/`, `scripts/`, `Cargo.toml` (`exclude`) | S | `git ls-files \| ForEach-Object { (Get-Item $_).Length } \| Measure-Object -Max` shows no tracked file over ~200 KB except the parquet fixture; fetch script reproduces the pinned hash |
 | 13 | Control-plane composition: `ArcSwap<Scenario>` + `/_mock/scenario` GET/PUT/PATCH + `/_mock/reset`, gated by `NO_LLM_CONTROL_PLANE` | Lets one long-lived server serve a whole test suite, including error paths, with no restarts | `src/http/routes.rs`, `src/scenario.rs`, `src/config.rs` | M | test switches to `flaky`, asserts a 500, resets, asserts 200; routes absent (404) when the switch is off |
 | 14 | `--metrics` with six hand-rolled Prometheus counters | Cheap visibility into stream aborts and injected failures during a long GUI suite | `src/http/routes.rs`, `src/service.rs` | S | `/metrics` returns valid text format with `sse_streams_active`; absent when the flag is off |

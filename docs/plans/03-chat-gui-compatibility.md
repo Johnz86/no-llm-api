@@ -7,11 +7,11 @@ list models, stream a reply, cancel it, and see a real error envelope - with no 
 
 | Source | What was read | Where |
 | --- | --- | --- |
-| OpenAI OpenAPI spec (local) | `Error` (required: `type`,`message`,`param`,`code`), `ErrorResponse`, `ListModelsResponse`, `Model`, `GET /models`, `GET /models/{model}` | `openapi.yaml:23268`, `:23305`, `:26541`, `:27386`, `:6297`, `:6376` (note: `openapi.documented.yml` is not present in the repo; only `openapi.yaml`) |
+| OpenAI OpenAPI spec (local) | `Error` (required: `type`,`message`,`param`,`code`), `ErrorResponse`, `ListModelsResponse`, `Model`, `GET /models`, `GET /models/{model}` | `openapi.yaml:37735` (`Error`), `:37772` (`ErrorResponse`), `:42437` (`ListModelsResponse`), `:43830` (`Model`), `:8658` (`/models`), `:8735` (`/models/{model}`) |
 | openai-node (master) | `SSEDecoder.decode` ignores lines starting with `:`; terminator check `sse.data.startsWith('[DONE]')`; mid-stream `data.error` -> throws `APIError`; `finally { if (!done) controller.abort() }` | `src/core/streaming.ts` |
 | openai-node (master) | `APIError` reads `headers.get('x-request-id')` and `error.code` / `error.param` / `error.type` | `src/core/error.ts` |
-| async-openai 0.41.1 (local clone) | `stream()` breaks only on `message.data == "[DONE]"` (exact equality); uses `reqwest-eventsource` (comments ignored); `Model`/`ListModelResponse` shape; usage-chunk semantics | `async-openai/async-openai/src/client.rs` (`stream()`), `.../types/model.rs:5-20`, `.../types/chat.rs:891` |
-| async-openai 0.41.1 features | `[features]` = rustls / native-tls / realtime / byot only - the models API is **not** feature-gated, so `client.models().list()` is usable in our compat test | `async-openai/async-openai/Cargo.toml:15-27` |
+| async-openai 0.41.1 (cargo registry) | `stream()` breaks only on `message.data == "[DONE]"` (exact equality); uses `reqwest-eventsource` (comments ignored); `Model`/`ListModelResponse` shape; usage-chunk semantics | `AO/client.rs:770-830` (`stream()`), `AO/types/models/model.rs:5-20`, `AO/types/chat/chat_.rs:1178-1199` |
+| async-openai 0.41.1 features | the models API is gated behind the `model` feature, while `chat-completion` is what we enable; add `features = ["chat-completion", "model"]` before using `client.models().list()` in the compat test | `async-openai-0.41.1/Cargo.toml` `[features]` |
 | axum 0.8.9 | `Sse::into_response` sets only `content-type: text/event-stream` + `cache-control: no-cache`; `KeepAlive::text(x)` -> `Event::default().comment(x)` -> wire bytes `:ping\n\n` | `axum-0.8.9/src/response/sse.rs:94-99`, `:547-551`, `:288-294` |
 | tiktoken-rs 0.12.0 | `CoreBPE::decode` = `String::from_utf8(decode_bytes(..))` -> **Err on partial multi-byte token** | `tiktoken-rs-0.12.0/src/patched_tiktoken.rs:205-206` |
 | Open WebUI docs (fetched 2026-07-25) | connection verification calls `/models` with `Bearer`; `/v1/models` GET "Recommended", `/v1/chat/completions` POST "Yes"; model-list fetch timeout env `AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST` (default 10 s); base URL must include `/v1`, no trailing slash | docs.openwebui.com/getting-started/quick-start/connect-a-provider/starting-with-openai-compatible/ |
@@ -111,13 +111,13 @@ Present but unknown key -> `401`:
 ```
 
 Notes:
-- All four `Error` members are required by `openapi.yaml:23268-23284` and openai-node reads `code`/`param` off the body (`error.ts`). The current `ErrorBody` (`routes.rs`) emits only `message` + `type` -> `code` and `param` come back `undefined`.
+- All four `Error` members are required by `openapi.yaml:37735-37753` and openai-node reads `code`/`param` off the body (`error.ts`). The current `ErrorBody` (`routes.rs`) emits only `message` + `type` -> `code` and `param` come back `undefined`.
 - Also send `WWW-Authenticate: Bearer` on 401 and a `x-request-id` header on every response (openai-node stores it on errors; useful for correlating logs).
 - Never echo the full key in the message - mask as above.
 
 ## 4. Model catalogue
 
-`GET /v1/models` (and `/models`) response - exactly the spec shape (`openapi.yaml:26541` + `:27386`; matches `async_openai::types::Model`):
+`GET /v1/models` (and `/models`) response - exactly the spec shape (`openapi.yaml:42437` + `:43830`; matches `async_openai::types::Model`):
 
 ```json
 {
@@ -129,7 +129,7 @@ Notes:
 }
 ```
 
-`GET /v1/models/{model}` returns the single `Model` object, `404` with `code: "model_not_found"` otherwise (spec path `openapi.yaml:6376`).
+`GET /v1/models/{model}` returns the single `Model` object, `404` with `code: "model_not_found"` otherwise (spec path `openapi.yaml:8735`).
 
 Configuration - fixture-driven with an env override:
 

@@ -36,19 +36,20 @@ default to `main`.
 ## Historical note: the two files this replaced
 
 Until 2026-07-25 the repository carried two stale October 2025 snapshots with
-confusing lineage:
+confusing lineage. Both are now gone.
 
-| File | What it was | Verdict |
+| File | What it was | Fate |
 | --- | --- | --- |
 | `openapi.yaml` (1.31 MB, OpenAPI 3.0.0, 99 paths) | the old codegen-oriented 3.0.0 down-conversion that upstream no longer publishes; no `gpt-5`, no `/chatkit`, no `/videos` | replaced by the current 3.1.0 spec |
-| `openapi.documented.yml` (2.21 MB, OpenAPI 3.1.0, 129 paths) | the richer documented variant, since renamed upstream to plain `openapi.yaml` | superseded; kept untracked and gitignored only because plan documents 01, 02 and 04 cite line numbers in it |
+| `openapi.documented.yml` (2.21 MB, OpenAPI 3.1.0, 129 paths) | the richer documented variant, since renamed upstream to plain `openapi.yaml` | deleted; every plan citation into it was re-anchored to the refreshed `openapi.yaml` first |
 
 Neither was unusable: on the Chat Completions surface specifically they were one
 or two fields behind (`moderation`, `verbosity`). The real problem was that
 nothing recorded where they came from or when, and the tracked one was the worse
 of the two.
 
-Line-number citations into `openapi.documented.yml` in the plan documents cannot
-be resolved from a fresh clone. Re-anchor them to schema names in `openapi.yaml`
-when touching those plans. Roadmap item R46 still proposes replacing this 2.7 MB
-copy with a pruned chat-completions extract.
+Line numbers cited in `docs/plans/*` were re-anchored to upstream commit
+`5c044be3bf3a`. Refreshing the spec shifts them again, so each citation also
+names the schema or path it points at - prefer the name. Roadmap item R46 still
+proposes replacing this 2.7 MB copy with a pruned chat-completions extract, which
+would make the citations stable.

@@ -18,5 +18,6 @@ numbered plan when you need the evidence behind a roadmap row.
 | [`plans/05-operability-and-packaging.md`](plans/05-operability-and-packaging.md) | How is it configured, observed, shipped and maintained? CLI/config overhaul, scenario bundles, logging and health, Dockerfile and compose, live-mode hardening, repo hygiene, and versioning policy. |
 
 All five plans are planning-only and were written against the tree as of 2026-07; every claim carries
-a `file:line` or schema-name citation. Where a citation points at `openapi.documented.yml`, note that
-the file is untracked (see roadmap decision D10).
+a `file:line` or schema-name citation. Spec citations point at the tracked `openapi.yaml`, re-anchored
+to upstream commit `5c044be3bf3a` - see [`spec/upstream-openapi.md`](spec/upstream-openapi.md) for how
+to refresh it and why line numbers shift when you do.

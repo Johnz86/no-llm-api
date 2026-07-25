@@ -5,9 +5,9 @@ in parallel, on any machine, and get byte-identical SSE frames unless it explici
 variation.
 
 Evidence base for this document: `src/service.rs`, `src/dataset.rs`, `src/store.rs`,
-`src/tokenizer.rs`, `src/http/routes.rs`, `src/model.rs`;
-`async-openai/async-openai/src/types/chat.rs` (reference client, v0.41.1);
-`openapi.documented.yml`; `tiktoken-rs-0.12.0/src/patched_tiktoken.rs`.
+`src/tokenizer.rs`, `src/http/routes.rs`, `src/model.rs`; the reference client v0.41.1 at
+`%USERPROFILE%\.cargo\registry\src\index.crates.io-*\async-openai-0.41.1\src\types\chat\chat_.rs`;
+the tracked `openapi.yaml` (upstream commit `5c044be3bf3a`); `tiktoken-rs-0.12.0/src/patched_tiktoken.rs`.
 
 ---
 
@@ -98,8 +98,8 @@ Seed participation:
 - Absent `seed`, use the scenario's `default_seed`, else `0`. Never use time or a random source.
 - Echo `seed` back and derive `system_fingerprint` from the plan, e.g.
   `fp_mock_{plan_digest:08x}`. The spec models `system_fingerprint` as the change-detection
-  companion to `seed` (`openapi.documented.yml:34453-34455`, and the field is marked
-  `deprecated: true` at `openapi.documented.yml:34093-34095`), so a plan-derived value is both
+  companion to `seed` (`openapi.yaml:32969`, and the field is marked
+  `deprecated: true` at `openapi.yaml:33140-33142`), so a plan-derived value is both
   spec-shaped and useful: a GUI test can assert "the backend plan did not change".
 - Type nit: repo has `seed: Option<u64>` (`src/model.rs:110`) while spec and reference client use
   `i64` (`chat.rs:808`). Widen to `i64` and hash the two's-complement bits; negative seeds are legal
@@ -314,7 +314,7 @@ fixed-`Duration` loop (`routes.rs:125`) cannot express at all.
 | `jitter_ms` | per-gap random-but-seeded delay | Detects layout thrash and scroll-anchoring bugs from irregular token arrival. |
 | `stall;after_tokens=N;ms=M` | emit N tokens, hold the connection open M ms with only SSE keep-alives, then continue | Client read-timeout handling and "still generating" affordances. `routes.rs:210-215` already installs a 15s keep-alive comment - a stall longer than that also verifies the GUI ignores keep-alive frames. |
 | `drop;after_tokens=N` | emit N tokens then drop the sender without a final chunk and without `[DONE]` | Partial-message rendering and recovery. async-openai surfaces this as a stream error; a GUI should keep the partial text and mark it incomplete, not discard the bubble. |
-| `sse_error;after_tokens=N` | emit N tokens, then one SSE frame whose data is an OpenAI error envelope (`{"error":{"message":...,"type":"server_error","code":null}}`), then close without `[DONE]` | Mid-stream error surfacing. This is how real OpenAI reports failures after headers are sent; the spec shows the shape at `openapi.documented.yml:31533`. |
+| `sse_error;after_tokens=N` | emit N tokens, then one SSE frame whose data is an OpenAI error envelope (`{"error":{"message":...,"type":"server_error","code":null}}`), then close without `[DONE]` | Mid-stream error surfacing. This is how real OpenAI reports failures after headers are sent; the spec shows the shape at `openapi.yaml:37735`. |
 | `http_error;status=429;retry_after=2` | pre-stream: status 429 + `Retry-After: 2` + `x-ratelimit-remaining-requests: 0` + error envelope | Retry/backoff logic and rate-limit banners. Requires the error envelope work from plan 01. |
 | `http_error;status=500` / `503` | pre-stream failure; 503 also sets `Retry-After` | Generic failure paths and circuit breakers. |
 | `http_error;...;after_tokens=N` | cannot change status mid-stream; degrade to `sse_error` + close and log the coercion | Documents the HTTP reality so tests do not assert something impossible. |

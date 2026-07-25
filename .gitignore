@@ -7,7 +7,6 @@
 
 # Reference material fetched locally, never committed
 /async-openai
-/openapi.documented.yml
 
 # Local scratch
 tmp_patch

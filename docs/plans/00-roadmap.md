@@ -17,6 +17,21 @@ Battle ready = these observable capabilities:
 4. Slow / flaky / unauthorized / tool-calling / refusal behaviour is reachable by one switch, seeded.
 5. `cargo test` proves 1-4; `docker run` delivers it to someone who does not build Rust.
 
+## Already landed (baseline for M1)
+
+Do not redo these; the tree is at this state.
+
+| Commit | What |
+| --- | --- |
+| `553e496` | Salvaged the uncommitted work: expanded parquet schema, live OpenAI/Azure proxy, `recorder` and `regenerate_dataset` binaries, lib/bin split, opt-in async-openai contract test. `.env` and generated fixtures ignored; `.env.example` added. |
+| `396a7e6` | All dependencies at latest: async-openai 0.41.1 from crates.io (path dep on the vendored clone dropped, types now under `async_openai::types::chat`), tiktoken-rs 0.12 (`decode` takes a slice), arrow/parquet 59, axum 0.8.9, tokio 1.53. |
+| `fd07f82` | This roadmap plus plans 01-05. |
+| `b680742` | Deleted `GEMINI.md`, `task.md` and both vendored clones; moved the wire contract to `docs/spec/chat-completions-scope.md`; corrected stale `AGENTS.md` claims. |
+| `c00a6c6` | `openapi.yaml` refreshed to upstream commit `5c044be3bf3a` with `scripts/fetch-openapi.ps1`/`.sh` and `openapi.provenance.json`. |
+
+Verification baseline: `ASYNC_OPENAI_COMPAT=1 cargo test` passes; note this reports 15 results for
+8 authored tests because `main.rs` re-declares the library's modules (R1).
+
 ## Critical path
 
 Milestones are days of work, ordered so the cheapest GUI wins land first. Each exit criterion is runnable.
@@ -111,7 +126,7 @@ Real disagreements between plans. Each needs a call before the owning milestone 
 | D7 | Non-spec response fields. 01B2: delete the request echoes, lean POST vs enriched GET/list. 03W7: keep the fields, add `skip_serializing_if`. | (a) 01 (b) 03 (c) both | 03's is one line per field and lands today; 01's is spec-accurate and matches the spec's own `listChatCompletions` example. They are not exclusive. | Both, in order: R16 (03) as the same-day stopgap, R30 (01) as the real fix. Do not stop at R16. |
 | D8 | **SETTLED.** Vendored `./async-openai` clone as the reference. 01 and 03 cite it; 05 s6 showed it was version 0.30.1 while we depend on 0.41.1. | (a) keep (b) pin to v0.41.1 (c) use the cargo registry copy | A skewed reference clone is worse than none - it invents constraints the real client does not have. | (c). Both untracked clones (`./async-openai`, `./openai-func-enums`) were deleted in the cleanup commit; `AGENTS.md` now points at `~/.cargo/registry/src/*/async-openai-0.41.1/`, which is guaranteed to match `Cargo.lock`. Citations in plans 01 and 03 that use `./async-openai/...` paths refer to the deleted 0.30.1 clone - re-resolve them against the registry copy. |
 | D9 | Where the stream loop lives. 02: new `src/sim/stream.rs`. 03W6: rewrite in place in `routes.rs`. | (a)/(b) | Doing R10/R11/R12 in `routes.rs` and then moving them for R26 means rewriting the same loop twice. | Extract to `src/sim/stream.rs` once, during R11, consumer-driven (`async_stream`). Sequencing decision, not a design one - but it must be made before M2 starts. |
-| D10 | **PARTLY SETTLED.** Spec citations point at `openapi.documented.yml`, which 03 verified is **not tracked** (`.gitignore:14`); only the stale 3.0.0 `openapi.yaml` was. Plans 01 and 04 cite `openapi.documented.yml` line numbers. | (a) track the big file (b) track a pruned extract (c) leave it | Line-number citations into an untracked 2.2 MB file cannot be checked by anyone who clones the repo, which quietly rots every acceptance criterion that references a schema. | Interim: `openapi.yaml` was refreshed to the current upstream 3.1.0 spec (2.7 MB, commit `5c044be3bf3a`, 2026-07-23) with `scripts/fetch-openapi.ps1`/`.sh` and provenance in `openapi.provenance.json`; see `docs/spec/upstream-openapi.md`. R46's pruned extract is still wanted to get the tracked size down - when it lands, re-anchor the plan citations to schema names in that extract. |
+| D10 | **SETTLED.** Spec citations used to point at `openapi.documented.yml`, an untracked stale snapshot; the tracked copy was a stale 3.0.0 down-conversion. | (a) track the big file (b) track a pruned extract (c) leave it | Line-number citations into an untracked file cannot be checked by anyone who clones the repo, which quietly rots every acceptance criterion that references a schema. | (a) for now: `openapi.yaml` was refreshed to the current upstream 3.1.0 spec (2.7 MB, commit `5c044be3bf3a`, 2026-07-23) via `scripts/fetch-openapi.ps1`/`.sh`, provenance in `openapi.provenance.json`, process in `docs/spec/upstream-openapi.md`. `openapi.documented.yml` was deleted and every citation in plans 01-04 re-anchored to the tracked file. R46's pruned extract remains the end state because it makes line numbers stable; until then each citation also names its schema - prefer the name. |
 
 ## First three commits
 
@@ -142,6 +157,9 @@ Error envelope with all four keys + `.fallback()` + `JsonRejection` handler; `GE
 Verify: plan 03 section 8 smoke commands 1, 2 and 6 pass; `cargo test --test http_api` green;
 new async-openai test asserts `client.models().list()` deserialises and returns >= 1 model;
 `GET /` returns 200 when the binary is started from a different working directory.
+Note: `client.models()` is gated behind async-openai's `model` feature, which we do not enable
+today - add `features = ["chat-completion", "model"]` to the dev usage before writing that
+assertion. Plan 03's source table originally claimed the models API was not feature-gated; it is.
 
 ## Non-goals for the short term
 
@@ -167,6 +185,6 @@ new async-openai test asserts `client.models().list()` deserialises and returns 
 | Determinism work (M3) invalidates fixtures and snapshots written in M2 | Snapshots taken before `IdentityMode` need re-approval; the fallback answer for off-script prompts changes | Land R21 before R22; until then use `insta` redactions for `id`/`created`/`request_id` only, and snapshot only prompts that match a script (04 s4). |
 | Timing assertions flake on CI runners | A flaky pacing test gets `#[ignore]`d, and the product's core knob goes unverified again | Assert median inter-frame gap with 50% tolerance, keep all timing tests in one file, and add one strict lower-bound test at `TOKENS_PER_SECOND=2` (04 s3). Prefer `tokio::time::pause` where the harness allows. |
 | Live mode drags TLS and money into an offline mock | `reqwest`/`rustls`/`ring`/`secrecy` are in the default build today; an accidental live run during a GUI dev loop bills real money | R40 first in M5 (`default = []`), then R42's caps and redaction. Keep `NO_LLM_API_LIVE=1` as the single opt-in test gate and blank it in CI (04 s6). |
-| Spec citations rot (decision D10) | Acceptance criteria referencing `openapi.documented.yml:NNNNN` are uncheckable on a fresh clone | R46 early: track the pruned extract and cite schema names, not only line numbers. |
+| Spec citations rot (decision D10) | Line numbers in plans 01-04 point at `openapi.yaml` as of upstream commit `5c044be3bf3a`; the next `scripts/fetch-openapi.ps1` run shifts every one of them | Each citation also names its schema or path - prefer the name. Run `scripts/fetch-openapi.ps1 -Check` before trusting a line number, and land R46's pruned extract to make them stable. |
 | Scope creep from five plans into one sprint | 50 rows is more than days of work; the temptation is to start at R50 | The milestone column is the contract. Nothing from M4/M5 starts before its milestone's exit criterion is met, and the non-goals table above is binding. |
 | Control plane turns the mock into an attack surface | On-by-default admin routes plus ignored `Authorization` on a published container port (05 s4) | Decision D1's loopback-gated default, WARN on non-loopback bind with auth off, and 02's header redaction in the request log. |
