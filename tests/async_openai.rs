@@ -163,6 +163,7 @@ fn request_with_text(text: &str) -> ChatCompletionRequest {
             role: ChatRole::User,
             content: Some(MessageContent::Text(text.to_string())),
             name: None,
+            tool_call_id: None,
             tool_calls: None,
             function_call: None,
             audio: None,

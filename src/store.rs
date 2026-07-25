@@ -221,7 +221,7 @@ mod tests {
             }],
             metadata: None,
             system_fingerprint: Some("fp_test".to_string()),
-            service_tier: Some("default".to_string()),
+            service_tier: Some(crate::request_types::ServiceTier::Default),
             request_id: Some(format!("req_{id}")),
             temperature: Some(1.0),
             top_p: Some(1.0),

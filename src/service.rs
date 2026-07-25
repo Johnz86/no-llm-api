@@ -279,8 +279,7 @@ impl ChatService {
         let presence_penalty = request.presence_penalty.or(Some(0.0));
         let service_tier = request
             .service_tier
-            .clone()
-            .or_else(|| Some("default".to_string()));
+            .or(Some(crate::request_types::ServiceTier::Default));
 
         let response = ChatCompletionResponse {
             id: identifier.clone(),
@@ -468,7 +467,7 @@ pub fn chunk_from_delta(
         model: response.model.clone(),
         choices: vec![choice],
         system_fingerprint: response.system_fingerprint.clone(),
-        service_tier: response.service_tier.clone(),
+        service_tier: response.service_tier,
         usage: None,
     }
 }
@@ -481,7 +480,7 @@ pub fn usage_chunk(response: &ChatCompletionResponse) -> ChatCompletionChunk {
         model: response.model.clone(),
         choices: Vec::new(),
         system_fingerprint: response.system_fingerprint.clone(),
-        service_tier: response.service_tier.clone(),
+        service_tier: response.service_tier,
         usage: Some(response.usage.clone()),
     }
 }
@@ -503,6 +502,7 @@ mod tests {
                 role: ChatRole::User,
                 content: Some(MessageContent::Text(text.to_string())),
                 name: None,
+                tool_call_id: None,
                 tool_calls: None,
                 function_call: None,
                 audio: None,

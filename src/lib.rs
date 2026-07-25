@@ -9,6 +9,7 @@ pub mod live_safety;
 pub mod live;
 pub mod model;
 pub mod models;
+pub mod request_types;
 pub mod service;
 pub mod sim;
 pub mod store;

@@ -5,7 +5,8 @@
 //! (`openapi.yaml:32658`).
 
 use crate::http::error::ApiError;
-use crate::model::ChatCompletionRequest;
+use crate::model::{ChatCompletionRequest, ChatRole};
+use crate::request_types::{ToolChoice, is_valid_function_name};
 
 /// Validates a request, returning the spec-shaped error for the first problem.
 pub fn validate(request: &ChatCompletionRequest) -> Result<(), ApiError> {
@@ -51,6 +52,94 @@ pub fn validate(request: &ChatCompletionRequest) -> Result<(), ApiError> {
         ));
     }
 
+    if let Some(n) = request.n
+        && n > 128
+    {
+        return Err(invalid("n", "Invalid value for 'n': must be at most 128."));
+    }
+
+    if let Some(stop) = &request.stop
+        && stop.len() > 4
+    {
+        return Err(invalid(
+            "stop",
+            "Invalid value for 'stop': at most 4 stop sequences are allowed.",
+        ));
+    }
+
+    if let Some(bias) = &request.logit_bias {
+        for (token, value) in bias {
+            if !(-100..=100).contains(&i32::from(*value)) {
+                return Err(invalid(
+                    "logit_bias",
+                    format!(
+                        "Invalid value for 'logit_bias[{token}]': must be between -100 and 100."
+                    ),
+                ));
+            }
+        }
+    }
+
+    if let Some(tools) = &request.tools {
+        for tool in tools {
+            if let Some(name) = tool.function_name()
+                && !is_valid_function_name(name)
+            {
+                return Err(invalid(
+                    "tools",
+                    format!(
+                        "Invalid value for 'tools': function name '{name}' must be 1-64 characters \
+                         of letters, digits, underscores and dashes."
+                    ),
+                ));
+            }
+        }
+    }
+
+    // A forced tool that is not declared can never fire, so the request is a bug
+    // rather than a scenario worth simulating.
+    if let Some(ToolChoice::Named { function, .. }) = &request.tool_choice {
+        let declared = request
+            .tools
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .any(|tool| tool.function_name() == Some(function.name.as_str()));
+        if !declared {
+            return Err(invalid(
+                "tool_choice",
+                format!(
+                    "Invalid value for 'tool_choice': function '{}' is not present in 'tools'.",
+                    function.name
+                ),
+            ));
+        }
+    }
+
+    for (index, message) in request.messages.iter().enumerate() {
+        match message.role {
+            ChatRole::Tool if message.tool_call_id.is_none() => {
+                return Err(invalid(
+                    "messages",
+                    format!(
+                        "Invalid message at index {index}: 'tool_call_id' is required when role is 'tool'."
+                    ),
+                ));
+            }
+            ChatRole::User | ChatRole::System | ChatRole::Developer
+                if message.content.is_none() =>
+            {
+                return Err(invalid(
+                    "messages",
+                    format!(
+                        "Invalid message at index {index}: 'content' is required for this role."
+                    ),
+                ));
+            }
+            _ => {}
+        }
+    }
+
     Ok(())
 }
 
@@ -71,7 +160,10 @@ fn invalid(param: &str, message: impl Into<String>) -> ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ChatCompletionRequestMessage, ChatRole, MessageContent};
+    use crate::model::{ChatCompletionRequestMessage, MessageContent};
+    use crate::request_types::{
+        FunctionDefinition, FunctionName, StopConfiguration, Tool, ToolKind,
+    };
 
     fn request() -> ChatCompletionRequest {
         ChatCompletionRequest {
@@ -80,6 +172,7 @@ mod tests {
                 role: ChatRole::User,
                 content: Some(MessageContent::Text("hi".to_string())),
                 name: None,
+                tool_call_id: None,
                 tool_calls: None,
                 function_call: None,
                 audio: None,
@@ -163,5 +256,93 @@ mod tests {
         assert!(validate(&request).is_ok());
         request.n = Some(0);
         assert!(validate(&request).is_err());
+        request.n = Some(129);
+        assert!(validate(&request).is_err());
+        request.n = Some(128);
+        assert!(validate(&request).is_ok());
+    }
+
+    #[test]
+    fn more_than_four_stop_sequences_is_rejected() {
+        let mut request = request();
+        request.stop = Some(StopConfiguration::Multiple(
+            ["a", "b", "c", "d"].iter().map(|s| s.to_string()).collect(),
+        ));
+        assert!(validate(&request).is_ok());
+        request.stop = Some(StopConfiguration::Multiple(
+            ["a", "b", "c", "d", "e"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        ));
+        let error = validate(&request).unwrap_err();
+        assert_eq!(error.body.param.as_deref(), Some("stop"));
+    }
+
+    #[test]
+    fn logit_bias_outside_the_documented_range_is_rejected() {
+        let mut request = request();
+        request.logit_bias = Some([("42".to_string(), 100i8)].into_iter().collect());
+        assert!(validate(&request).is_ok());
+        request.logit_bias = Some([("42".to_string(), 120i8)].into_iter().collect());
+        let error = validate(&request).unwrap_err();
+        assert_eq!(error.body.param.as_deref(), Some("logit_bias"));
+    }
+
+    #[test]
+    fn a_malformed_function_name_is_rejected() {
+        let mut request = request();
+        request.tools = Some(vec![Tool::Function {
+            function: FunctionDefinition {
+                name: "get weather".to_string(),
+                description: None,
+                parameters: None,
+                strict: None,
+            },
+        }]);
+        let error = validate(&request).unwrap_err();
+        assert_eq!(error.body.param.as_deref(), Some("tools"));
+    }
+
+    #[test]
+    fn forcing_an_undeclared_tool_is_rejected() {
+        let mut request = request();
+        request.tool_choice = Some(ToolChoice::Named {
+            r#type: ToolKind::Function,
+            function: FunctionName {
+                name: "get_weather".to_string(),
+            },
+        });
+        let error = validate(&request).unwrap_err();
+        assert_eq!(error.body.param.as_deref(), Some("tool_choice"));
+
+        request.tools = Some(vec![Tool::Function {
+            function: FunctionDefinition {
+                name: "get_weather".to_string(),
+                description: None,
+                parameters: None,
+                strict: None,
+            },
+        }]);
+        assert!(validate(&request).is_ok());
+    }
+
+    #[test]
+    fn a_tool_message_needs_the_call_it_answers() {
+        let mut request = request();
+        request.messages[0].role = ChatRole::Tool;
+        let error = validate(&request).unwrap_err();
+        assert_eq!(error.body.param.as_deref(), Some("messages"));
+
+        request.messages[0].tool_call_id = Some("call_alpha".to_string());
+        assert!(validate(&request).is_ok());
+    }
+
+    #[test]
+    fn a_user_message_without_content_is_rejected() {
+        let mut request = request();
+        request.messages[0].content = None;
+        let error = validate(&request).unwrap_err();
+        assert_eq!(error.body.param.as_deref(), Some("messages"));
     }
 }

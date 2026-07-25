@@ -604,6 +604,118 @@ async fn valid_boundary_parameters_are_accepted() {
 }
 
 #[tokio::test]
+async fn wrongly_typed_fields_are_rejected_instead_of_echoed() {
+    let fixture = fixture(1000);
+    for (field, value) in [
+        ("service_tier", json!("turbo")),
+        ("reasoning_effort", json!("extreme")),
+        ("modalities", json!(["video"])),
+        ("response_format", json!({ "type": "yaml" })),
+        ("tool_choice", json!("maybe")),
+        ("tools", json!([{ "type": "plugin" }])),
+        ("logit_bias", json!({ "42": 5000 })),
+        ("audio", json!({ "voice": "alloy", "format": "ogg" })),
+        ("stop", json!(42)),
+    ] {
+        let mut request = body(PLAIN_PROMPT);
+        request[field] = value;
+        let (status, _, text) = send(
+            fixture.app.clone(),
+            "POST",
+            "/v1/chat/completions",
+            Some(request),
+        )
+        .await;
+        assert_eq!(status, 400, "'{field}' should have been rejected: {text}");
+        assert_error_envelope(&text);
+    }
+}
+
+#[tokio::test]
+async fn well_typed_fields_are_accepted_and_the_stored_object_keeps_them() {
+    let fixture = fixture(1000);
+    let mut request = body(PLAIN_PROMPT);
+    request["store"] = json!(true);
+    request["service_tier"] = json!("flex");
+    request["reasoning_effort"] = json!("high");
+    request["modalities"] = json!(["text"]);
+    request["response_format"] = json!({
+        "type": "json_schema",
+        "json_schema": { "name": "reply", "strict": true, "schema": { "type": "object" } }
+    });
+    request["stop"] = json!(["END", "STOP"]);
+    request["seed"] = json!(-42);
+    request["logit_bias"] = json!({ "42": -100 });
+    request["tools"] = json!([{
+        "type": "function",
+        "function": { "name": "get_weather", "parameters": { "type": "object" } }
+    }]);
+    request["tool_choice"] = json!({ "type": "function", "function": { "name": "get_weather" } });
+    request["audio"] = json!({ "voice": "alloy", "format": "pcm16" });
+
+    let (status, _, text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/chat/completions",
+        Some(request),
+    )
+    .await;
+    assert_eq!(status, 200, "{text}");
+    let lean: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(lean["service_tier"], "flex");
+
+    let id = lean["id"].as_str().unwrap();
+    let (_, _, stored) = send(
+        fixture.app.clone(),
+        "GET",
+        &format!("/v1/chat/completions/{id}"),
+        None,
+    )
+    .await;
+    let stored: serde_json::Value = serde_json::from_str(&stored).unwrap();
+    assert_eq!(stored["seed"], -42, "a negative seed must round-trip");
+    assert_eq!(stored["response_format"]["type"], "json_schema");
+    assert_eq!(stored["tools"][0]["function"]["name"], "get_weather");
+    assert_eq!(stored["tool_choice"]["function"]["name"], "get_weather");
+}
+
+#[tokio::test]
+async fn role_specific_message_requirements_are_enforced() {
+    let fixture = fixture(1000);
+    let (status, _, text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/chat/completions",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "messages": [
+                { "role": "user", "content": PLAIN_PROMPT },
+                { "role": "tool", "content": "42" }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, 400, "{text}");
+    let envelope = assert_error_envelope(&text);
+    assert_eq!(envelope["error"]["param"], "messages");
+
+    let (status, _, _) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/chat/completions",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "messages": [
+                { "role": "user", "content": PLAIN_PROMPT },
+                { "role": "tool", "content": "42", "tool_call_id": "call_alpha" }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, 200);
+}
+
+#[tokio::test]
 async fn streamed_responses_disable_proxy_buffering() {
     use axum::body::Body;
     use axum::http::Request;

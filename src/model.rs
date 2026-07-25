@@ -1,4 +1,9 @@
 use serde::{Deserialize, Serialize};
+
+use crate::request_types::{
+    AudioConfig, LogitBias, Modality, ReasoningEffort, ResponseFormat, ServiceTier,
+    StopConfiguration, Tool, ToolChoice,
+};
 use serde_json::{Map, Value};
 use std::borrow::Cow;
 
@@ -92,6 +97,9 @@ pub struct ChatCompletionRequestMessage {
     pub content: Option<MessageContent>,
     #[serde(default)]
     pub name: Option<String>,
+    /// Required when `role` is `tool`; validation enforces that.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
     #[serde(default)]
     pub tool_calls: Option<Vec<Value>>,
     #[serde(default)]
@@ -125,37 +133,37 @@ pub struct ChatCompletionRequest {
     #[serde(default)]
     pub presence_penalty: Option<f32>,
     #[serde(default)]
-    pub stop: Option<Value>,
+    pub stop: Option<StopConfiguration>,
     #[serde(default)]
     pub max_completion_tokens: Option<u32>,
     #[serde(default)]
-    pub reasoning_effort: Option<String>,
+    pub reasoning_effort: Option<ReasoningEffort>,
     #[serde(default)]
-    pub service_tier: Option<String>,
+    pub service_tier: Option<ServiceTier>,
     #[serde(default)]
-    pub response_format: Option<Value>,
+    pub response_format: Option<ResponseFormat>,
     #[serde(default)]
     pub response_prefix: Option<String>,
     #[serde(default)]
-    pub logit_bias: Option<Map<String, Value>>,
+    pub logit_bias: Option<LogitBias>,
     #[serde(default)]
     pub metadata: Option<Map<String, Value>>,
     #[serde(default)]
-    pub seed: Option<u64>,
+    pub seed: Option<i64>,
     #[serde(default)]
-    pub tools: Option<Vec<Value>>,
+    pub tools: Option<Vec<Tool>>,
     #[serde(default)]
-    pub tool_choice: Option<Value>,
+    pub tool_choice: Option<ToolChoice>,
     #[serde(default)]
     pub parallel_tool_calls: Option<bool>,
     #[serde(default)]
-    pub modalities: Option<Vec<String>>,
+    pub modalities: Option<Vec<Modality>>,
     #[serde(default)]
     pub stream_options: Option<ChatCompletionStreamOptions>,
     #[serde(default)]
     pub function_call: Option<Value>,
     #[serde(default)]
-    pub audio: Option<Value>,
+    pub audio: Option<AudioConfig>,
     #[serde(default)]
     pub user: Option<String>,
     #[serde(default)]
@@ -338,7 +346,7 @@ pub struct ChatCompletionResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_fingerprint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub service_tier: Option<String>,
+    pub service_tier: Option<ServiceTier>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -350,29 +358,29 @@ pub struct ChatCompletionResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presence_penalty: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stop: Option<Value>,
+    pub stop: Option<StopConfiguration>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub seed: Option<u64>,
+    pub seed: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_choice: Option<Value>,
+    pub tool_choice: Option<ToolChoice>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub response_format: Option<Value>,
+    pub response_format: Option<ResponseFormat>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parallel_tool_calls: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub modalities: Option<Vec<String>>,
+    pub modalities: Option<Vec<Modality>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_prefix: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub logit_bias: Option<Map<String, Value>>,
+    pub logit_bias: Option<LogitBias>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_options: Option<ChatCompletionStreamOptions>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub audio: Option<Value>,
+    pub audio: Option<AudioConfig>,
     /// Stored-object members from the spec's list example; not part of the lean
     /// `POST` response.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<Value>>,
+    pub tools: Option<Vec<Tool>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_user: Option<String>,
 }
@@ -398,7 +406,7 @@ pub struct LeanChatCompletionView {
     pub choices: Vec<ChatCompletionChoice>,
     pub usage: ChatCompletionUsage,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub service_tier: Option<String>,
+    pub service_tier: Option<ServiceTier>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_fingerprint: Option<String>,
 }
@@ -413,20 +421,20 @@ pub struct StoredChatCompletionView {
     pub model: String,
     pub created: i64,
     pub request_id: Option<String>,
-    pub tool_choice: Option<Value>,
+    pub tool_choice: Option<ToolChoice>,
     pub usage: ChatCompletionUsage,
-    pub seed: Option<u64>,
+    pub seed: Option<i64>,
     pub top_p: Option<f32>,
     pub temperature: Option<f32>,
     pub presence_penalty: Option<f32>,
     pub frequency_penalty: Option<f32>,
     pub system_fingerprint: Option<String>,
     pub input_user: Option<String>,
-    pub service_tier: Option<String>,
-    pub tools: Option<Vec<Value>>,
+    pub service_tier: Option<ServiceTier>,
+    pub tools: Option<Vec<Tool>>,
     pub metadata: Option<Map<String, Value>>,
     pub choices: Vec<ChatCompletionChoice>,
-    pub response_format: Option<Value>,
+    pub response_format: Option<ResponseFormat>,
 }
 
 impl ChatCompletionResponse {
@@ -438,7 +446,7 @@ impl ChatCompletionResponse {
             model: self.model.clone(),
             choices: self.choices.clone(),
             usage: self.usage.clone(),
-            service_tier: self.service_tier.clone(),
+            service_tier: self.service_tier,
             system_fingerprint: self.system_fingerprint.clone(),
         }
     }
@@ -459,7 +467,7 @@ impl ChatCompletionResponse {
             frequency_penalty: self.frequency_penalty,
             system_fingerprint: self.system_fingerprint.clone(),
             input_user: self.input_user.clone(),
-            service_tier: self.service_tier.clone(),
+            service_tier: self.service_tier,
             tools: self.tools.clone(),
             metadata: self.metadata.clone(),
             choices: self.choices.clone(),
@@ -516,7 +524,7 @@ pub struct ChatCompletionChunk {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_fingerprint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub service_tier: Option<String>,
+    pub service_tier: Option<ServiceTier>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<ChatCompletionUsage>,
 }
