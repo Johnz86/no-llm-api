@@ -230,10 +230,37 @@ impl ChatService {
             Some(MessageContent::Text(assistant_text.clone()))
         };
 
+        // A `<think>...</think>` prefix becomes reasoning_content, and the tokens
+        // are re-derived so pacing and usage still describe what is on the wire.
+        let (reasoning_content, message_content, reasoning_tokens) = match &message_content {
+            Some(MessageContent::Text(text)) => match crate::model::split_reasoning(text) {
+                (Some(reasoning), visible) => {
+                    let reasoning_token_count =
+                        self.tokenizer.encode_with_special_tokens(&reasoning).len() as u32;
+                    tokens = self.tokenizer.encode_with_special_tokens(&visible);
+                    (
+                        Some(reasoning),
+                        Some(MessageContent::Text(visible)),
+                        Some(reasoning_token_count),
+                    )
+                }
+                (None, _) => (None, message_content.clone(), None),
+            },
+            other => (None, other.clone(), None),
+        };
+
+        if let Some(reasoning_token_count) = reasoning_tokens {
+            usage.completion_tokens = tokens.len() as u32 + reasoning_token_count;
+            usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
+            let details = usage.completion_tokens_details.get_or_insert_default();
+            details.reasoning_tokens = Some(reasoning_token_count);
+        }
+
         let completion_message = ChatCompletionResponseMessage {
             role: ChatRole::Assistant,
             content: message_content,
             refusal: assistant.refusal.clone(),
+            reasoning_content,
             tool_calls: assistant.tool_calls.clone(),
             function_call: assistant.function_call.clone(),
             audio: assistant.audio.clone(),

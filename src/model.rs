@@ -226,12 +226,37 @@ pub struct ChatCompletionResponseMessage {
     pub content: Option<MessageContent>,
     #[serde(default)]
     pub refusal: Option<String>,
+    /// Not in the spec, but what reasoning-model GUIs render. Emitted before
+    /// `content` in a stream, and omitted entirely when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ChatCompletionMessageToolCall>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub function_call: Option<FunctionCall>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio: Option<ChatCompletionResponseMessageAudio>,
+}
+
+/// Splits a `<think>...</think>` prefix into reasoning and visible content.
+///
+/// This is the "tag" thinking style: fixtures stay a single text column, and the
+/// wire shape still separates the two the way a reasoning model does.
+pub fn split_reasoning(text: &str) -> (Option<String>, String) {
+    const OPEN: &str = "<think>";
+    const CLOSE: &str = "</think>";
+    let trimmed = text.trim_start();
+    if !trimmed.starts_with(OPEN) {
+        return (None, text.to_string());
+    }
+    match trimmed.find(CLOSE) {
+        Some(end) => {
+            let reasoning = trimmed[OPEN.len()..end].trim().to_string();
+            let rest = trimmed[end + CLOSE.len()..].trim_start().to_string();
+            (Some(reasoning).filter(|value| !value.is_empty()), rest)
+        }
+        None => (None, text.to_string()),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -514,6 +539,8 @@ pub struct ChatCompletionChunkDelta {
     pub role: Option<ChatRole>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refusal: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -135,6 +135,23 @@ fn build_frames(
         ..Default::default()
     }];
 
+    let choice = response.choices.first();
+
+    // Reasoning arrives before visible content, which is the order the GUIs that
+    // render a thinking pane expect.
+    if let Some(reasoning) = choice.and_then(|choice| choice.message.reasoning_content.as_deref()) {
+        let tokens = tokenizer.encode_with_special_tokens(reasoning);
+        frames.extend(
+            token_pieces(tokenizer, &tokens)
+                .into_iter()
+                .filter(|piece| !piece.is_empty())
+                .map(|piece| ChatCompletionChunkDelta {
+                    reasoning_content: Some(piece),
+                    ..Default::default()
+                }),
+        );
+    }
+
     frames.extend(
         pieces
             .iter()
@@ -144,8 +161,6 @@ fn build_frames(
                 ..Default::default()
             }),
     );
-
-    let choice = response.choices.first();
 
     if let Some(refusal) = choice.and_then(|choice| choice.message.refusal.as_deref()) {
         let tokens = tokenizer.encode_with_special_tokens(refusal);

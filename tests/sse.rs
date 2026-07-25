@@ -306,6 +306,75 @@ async fn stream_null_is_treated_as_not_streaming() {
 }
 
 #[tokio::test]
+async fn reasoning_is_separated_from_content_and_counted() {
+    let fixture = fixture(1000);
+    let (status, _, text) = support::send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/chat/completions",
+        Some(support::body(support::REASONING_PROMPT)),
+    )
+    .await;
+    assert_eq!(status, 200, "{text}");
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let message = &value["choices"][0]["message"];
+    assert_eq!(message["reasoning_content"], support::REASONING_TRACE);
+    assert_eq!(message["content"], support::REASONING_ANSWER);
+    assert!(
+        !message["content"].as_str().unwrap().contains("<think>"),
+        "the thinking tag must not leak into content: {text}"
+    );
+    let reasoning_tokens = value["usage"]["completion_tokens_details"]["reasoning_tokens"]
+        .as_u64()
+        .expect("reasoning_tokens must be reported");
+    assert!(reasoning_tokens > 0);
+    assert!(
+        value["usage"]["completion_tokens"].as_u64().unwrap() > reasoning_tokens,
+        "completion tokens must include both reasoning and content: {text}"
+    );
+}
+
+#[tokio::test]
+async fn reasoning_streams_before_content() {
+    let fixture = fixture(1000);
+    let transcript = collect_sse(fixture.app.clone(), stream_body(support::REASONING_PROMPT)).await;
+    transcript.assert_well_formed();
+
+    let chunks = transcript.chunks();
+    let last_reasoning = chunks.iter().rposition(|chunk| {
+        chunk["choices"][0]["delta"]
+            .get("reasoning_content")
+            .is_some()
+    });
+    let first_content = chunks.iter().position(|chunk| {
+        chunk["choices"][0]["delta"]
+            .get("content")
+            .and_then(|value| value.as_str())
+            .is_some_and(|value| !value.is_empty())
+    });
+    assert!(
+        last_reasoning.is_some(),
+        "no reasoning frames were streamed"
+    );
+    assert!(first_content.is_some(), "no content frames were streamed");
+    assert!(
+        last_reasoning < first_content,
+        "reasoning {last_reasoning:?} must precede content {first_content:?}"
+    );
+
+    let reasoning: String = chunks
+        .iter()
+        .filter_map(|chunk| {
+            chunk["choices"][0]["delta"]["reasoning_content"]
+                .as_str()
+                .map(str::to_owned)
+        })
+        .collect();
+    assert_eq!(reasoning, support::REASONING_TRACE);
+    assert_eq!(transcript.content(), support::REASONING_ANSWER);
+}
+
+#[tokio::test]
 async fn dropping_the_stream_cancels_the_simulation() {
     use axum::body::Body;
     use axum::http::Request;

@@ -23,7 +23,7 @@ use crate::model::{ChatCompletionList, ChatCompletionMessageList, ChatCompletion
 use crate::models::ModelCatalogue;
 use crate::service::ChatService;
 use crate::sim::directive::Directive;
-use crate::sim::scenario::{FaultKind, Scenario};
+use crate::sim::scenario::{FaultKind, Scenario, Timing};
 use crate::sim::stream::{CancelCounter, StreamPlan, sse_stream};
 use crate::store::{ListFilters, SortOrder};
 
@@ -334,7 +334,18 @@ async fn create_chat_completion(
             .map(Directive::from_value)
             .unwrap_or_default(),
     );
-    let (timing, fault) = directive.apply(&scenario);
+    // Per-model latency fills in for a scenario that expresses no opinion, so a
+    // catalogue can make "the reasoning model is slower" true without a restart.
+    let base = model_timing(&state, &request.model).unwrap_or_else(|| scenario.timing.clone());
+    let effective_scenario = Scenario {
+        timing: if scenario.timing == Timing::default() {
+            base
+        } else {
+            scenario.timing.clone()
+        },
+        ..scenario.as_ref().clone()
+    };
+    let (timing, fault) = directive.apply(&effective_scenario);
 
     let stream = request.stream;
     let prepared = state.service.create_completion(request).await?;
@@ -378,6 +389,24 @@ async fn create_chat_completion(
     response_headers.insert(&ACCEL_BUFFERING, HeaderValue::from_static("no"));
     response_headers.insert(&SIMULATE_MATCH, match_kind);
     Ok(response)
+}
+
+/// The pacing a catalogue entry declares, when it declares any.
+fn model_timing(state: &AppState, model: &str) -> Option<Timing> {
+    let latency = &state.models.profile(model)?.latency;
+    if latency.ttft_ms.is_none()
+        && latency.tokens_per_second.is_none()
+        && latency.jitter_ms.is_none()
+    {
+        return None;
+    }
+    Some(Timing {
+        ttft_ms: latency.ttft_ms.unwrap_or(0),
+        tokens_per_second: latency.tokens_per_second,
+        jitter_ms: latency.jitter_ms.unwrap_or(0),
+        chunk_tokens: None,
+        burst_frames: 0,
+    })
 }
 
 /// A stable per-request seed, derived from the already-derived completion id.

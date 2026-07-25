@@ -26,6 +26,10 @@ pub const TOOL_PROMPT: &str = "check the weather in two cities";
 pub const REFUSAL_PROMPT: &str = "do something disallowed";
 pub const REFUSAL_TEXT: &str = "I'm sorry, but I can't help with that request.";
 
+pub const REASONING_PROMPT: &str = "think it through";
+pub const REASONING_TRACE: &str = "The user wants the capital. France's capital is Paris.";
+pub const REASONING_ANSWER: &str = "Paris.";
+
 /// Two parallel tool calls with arguments long enough to be split.
 pub fn tool_calls_json() -> String {
     serde_json::json!([
@@ -96,6 +100,14 @@ pub fn default_rows() -> Vec<DatasetRow<'static>> {
         tool_reply,
         row("conv-refusal", 0, "user", REFUSAL_PROMPT, None),
         refusal_reply,
+        row("conv-reasoning", 0, "user", REASONING_PROMPT, None),
+        row(
+            "conv-reasoning",
+            1,
+            "assistant",
+            &format!("<think>{REASONING_TRACE}</think>{REASONING_ANSWER}"),
+            Some("stop"),
+        ),
     ]
 }
 

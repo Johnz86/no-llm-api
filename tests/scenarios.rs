@@ -196,6 +196,51 @@ async fn chunk_tokens_batches_content_into_fewer_frames() {
 }
 
 #[tokio::test]
+async fn a_models_latency_profile_paces_it_when_the_scenario_is_neutral() {
+    use no_llm_api::models::ModelCatalogue;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("models.json");
+    std::fs::write(
+        &path,
+        r#"[{"id":"slow-model","latency":{"ttft_ms":250,"tokens_per_second":20}},
+            {"id":"quick-model","latency":{"tokens_per_second":1000}}]"#,
+    )
+    .unwrap();
+    let catalogue = ModelCatalogue::from_path(&path).expect("catalogue");
+
+    let fixture = fixture_with_options(
+        1000,
+        RouterOptions {
+            models: catalogue,
+            ..RouterOptions::default()
+        },
+    );
+
+    let mut slow_request = stream_body(PLAIN_PROMPT);
+    slow_request["model"] = json!("slow-model");
+    let slow = collect_sse(fixture.app.clone(), slow_request).await;
+    slow.assert_well_formed();
+
+    let mut quick_request = stream_body(PLAIN_PROMPT);
+    quick_request["model"] = json!("quick-model");
+    let quick = collect_sse(fixture.app.clone(), quick_request).await;
+    quick.assert_well_formed();
+
+    assert!(
+        slow.frames[0].at >= Duration::from_millis(200),
+        "the model's ttft_ms must delay the first frame: {:?}",
+        slow.frames[0].at
+    );
+    assert!(
+        slow.median_gap() > quick.median_gap(),
+        "slow {:?} vs quick {:?}",
+        slow.median_gap(),
+        quick.median_gap()
+    );
+}
+
+#[tokio::test]
 async fn the_control_plane_reports_and_replaces_the_live_scenario() {
     let fixture = fixture(1000);
 

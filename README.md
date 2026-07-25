@@ -113,6 +113,35 @@ cargo run --features live --bin recorder -- --input recordings.json
 Without it, `DATASET_SOURCE=live` exits with an explanatory error rather than starting a server that
 cannot proxy.
 
+## Model catalogue and per-model behaviour
+
+`MODELS_PATH` accepts a bare array or `{ "data": [...] }`. Only the four spec fields reach a client;
+the rest drives simulation and is visible on `GET /_mock/models`:
+
+```json
+[
+  {
+    "id": "mock-reasoner",
+    "created": 1735689600,
+    "owned_by": "no-llm-api",
+    "context_window": 128000,
+    "capabilities": { "tools": true, "vision": false, "audio": false, "reasoning": true },
+    "latency": { "ttft_ms": 800, "tokens_per_second": 12, "jitter_ms": 60 }
+  }
+]
+```
+
+A model's `latency` block paces its requests whenever the active scenario expresses no opinion, so
+"the reasoning model is slower" is true without a restart. An explicit scenario, and then a
+per-request directive, still win.
+
+## Reasoning content
+
+A fixture reply that starts with `<think>...</think>` is split: the tag content becomes
+`reasoning_content` on the message and streams as `reasoning_content` deltas *before* any visible
+content, and its tokens are reported in `usage.completion_tokens_details.reasoning_tokens`. The
+thinking tag never leaks into `content`.
+
 ## Working with Datasets
 
 ### Regenerate bundled sample

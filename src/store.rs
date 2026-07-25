@@ -211,6 +211,7 @@ mod tests {
                     role: ChatRole::Assistant,
                     content: Some(MessageContent::Text("ok".to_string())),
                     refusal: None,
+                    reasoning_content: None,
                     tool_calls: None,
                     function_call: None,
                     audio: None,
