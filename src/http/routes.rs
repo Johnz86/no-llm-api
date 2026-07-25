@@ -129,7 +129,7 @@ async fn create_chat_completion(
 
         for (index, token) in tokens.into_iter().enumerate() {
             buffer.push(token);
-            let decoded = match tokenizer.decode(buffer.clone()) {
+            let decoded = match tokenizer.decode(&buffer) {
                 Ok(text) => text,
                 Err(error) => {
                     tracing::error!(target: "no_llm_api", ?error, "failed to decode token stream");

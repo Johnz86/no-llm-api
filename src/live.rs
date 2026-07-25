@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use async_openai::Client;
 use async_openai::config::{AzureConfig, OpenAIConfig};
 use async_openai::error::OpenAIError;
-use async_openai::types::{CreateChatCompletionRequest, CreateChatCompletionResponse};
+use async_openai::types::chat::{CreateChatCompletionRequest, CreateChatCompletionResponse};
 use serde_json::{self, Value};
 use thiserror::Error;
 use tiktoken_rs::CoreBPE;

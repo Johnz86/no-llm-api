@@ -153,7 +153,7 @@ impl ChatService {
             .filter(|cap| *cap < tokens.len())
         {
             tokens.truncate(cap);
-            match self.tokenizer.decode(tokens.clone()) {
+            match self.tokenizer.decode(&tokens) {
                 Ok(decoded) => assistant_text = decoded,
                 Err(error) => {
                     tracing::error!(

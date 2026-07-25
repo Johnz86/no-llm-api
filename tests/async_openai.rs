@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
-use async_openai::types::CreateChatCompletionRequest;
+use async_openai::types::chat::CreateChatCompletionRequest;
 use futures::StreamExt;
 use no_llm_api::config::TokenizerSettings;
 use no_llm_api::dataset::{ConversationScripts, ensure_sample_dataset};
