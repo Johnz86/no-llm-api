@@ -38,8 +38,9 @@ curl http://127.0.0.1:8080/v1/responses \
 It supports text, public reasoning summaries, refusals, validated structured output, and typed SSE
 events with `"stream":true`. `max_output_tokens` uses reasoning-first accounting and returns an
 incomplete response when the budget is exhausted. A request with `"store":true` is retrievable and
-deletable at `/v1/responses/{response_id}`. Continuation and tools return explicit
-unsupported-parameter errors until their dedicated implementation slices land.
+deletable at `/v1/responses/{response_id}`. A later request can name that immutable object through
+`previous_response_id`; the stored turn sequence and parent object participate in deterministic
+selection and identity. Tools remain explicitly unsupported until their implementation slice.
 
 ## Request behaviour
 

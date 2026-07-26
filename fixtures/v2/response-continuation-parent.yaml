@@ -1,0 +1,17 @@
+schema_version: 2
+id: response-continuation-parent
+description: Stored first turn for the deterministic correction continuation.
+tags: [text, multi-turn, continuation]
+interfaces: [responses]
+match:
+  models: [mock-gpt-4o, mock-gpt-4o-mini]
+  turns:
+    - role: user
+      text: Summarize the release in one paragraph.
+cases:
+  - id: initial-summary
+    default_variant: default
+    variants:
+      default:
+        answer: The release is ready after validation.
+    terminal: completed

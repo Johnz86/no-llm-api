@@ -12,7 +12,7 @@ use serde_json::Value;
 
 pub const SCHEMA_VERSION: u16 = 2;
 
-pub const BUILTINS: [(&str, &str); 11] = [
+pub const BUILTINS: [(&str, &str); 12] = [
     (
         "basic-text",
         include_str!("../../fixtures/v2/basic-text.yaml"),
@@ -56,6 +56,10 @@ pub const BUILTINS: [(&str, &str); 11] = [
     (
         "response-refusal",
         include_str!("../../fixtures/v2/response-refusal.yaml"),
+    ),
+    (
+        "response-continuation-parent",
+        include_str!("../../fixtures/v2/response-continuation-parent.yaml"),
     ),
 ];
 

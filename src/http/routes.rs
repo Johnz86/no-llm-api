@@ -23,7 +23,10 @@ use crate::http::metrics::Metrics;
 use crate::model::{ChatCompletionList, ChatCompletionMessageList, ChatCompletionRequest};
 use crate::models::ModelCatalogue;
 use crate::request_types::ResponseFormat;
-use crate::responses::{CreateResponseRequest, ResponseInput, ResponseTextFormat, render_response};
+use crate::responses::{
+    CreateResponseRequest, ResponseContentPart, ResponseInput, ResponseOutputItem,
+    ResponseTextFormat, render_response_with_context,
+};
 use crate::service::ChatService;
 use crate::service::SemanticDiagnostics;
 use crate::sim::artifact::{SemanticArtifact, builtin_artifact};
@@ -512,18 +515,44 @@ async fn create_response(
         .models
         .profile(&request.model)
         .ok_or_else(|| ApiError::model_not_found(&request.model))?;
+    let mut canonical = request.canonical_request();
+    let prior = if let Some(previous_response_id) = request.previous_response_id.as_deref() {
+        let stored = state
+            .responses
+            .get_stored(previous_response_id)
+            .await
+            .ok_or_else(|| {
+                ApiError::not_found(previous_response_id)
+                    .with_param("previous_response_id")
+                    .with_code("previous_response_not_found")
+            })?;
+        canonical.turns.splice(0..0, stored.turns.clone());
+        canonical.context = Some(
+            serde_json::to_value(&stored.response).expect("stored Responses objects serialize"),
+        );
+        Some(stored)
+    } else {
+        None
+    };
     let controls = state
         .semantic
         .selection_controls(directive.case.clone(), directive.variant.clone());
     let plan = crate::sim::plan::compile(
         &state.semantic.fixtures,
-        &request.canonical_request(),
+        &canonical,
         &controls,
         &SemanticCapabilities::from(profile),
     )
     .map_err(semantic_plan_error)?;
     validate_response_schema(&request, &plan)?;
-    let response = render_response(&request, &plan, state.service.tokenizer().as_ref());
+    let response = render_response_with_context(
+        &request,
+        &plan,
+        state.service.tokenizer().as_ref(),
+        prior
+            .as_ref()
+            .map_or(0, |stored| stored.response.usage.total_tokens),
+    );
     let scenario = state.scenario.load_full();
     let base = model_timing(&state, &request.model).unwrap_or_else(|| scenario.timing.clone());
     let effective_scenario = Scenario {
@@ -542,7 +571,9 @@ async fn create_response(
     }
     state.metrics.record_completion(request.stream);
     if request.store {
-        state.responses.save(response.clone()).await;
+        let mut turns = canonical.turns.clone();
+        turns.push(response_turn(&response));
+        state.responses.save(response.clone(), turns).await;
     }
 
     let diagnostics = SemanticDiagnostics {
@@ -591,6 +622,33 @@ async fn create_response(
     Ok(wire)
 }
 
+fn response_turn(
+    response: &crate::responses::ResponseObject,
+) -> crate::sim::canonical::CanonicalTurn {
+    let refusal = response.output.iter().find_map(|item| match item {
+        ResponseOutputItem::Message { content, .. } => content.iter().find_map(|part| match part {
+            ResponseContentPart::Refusal { refusal } => Some(refusal.clone()),
+            ResponseContentPart::OutputText { .. } => None,
+        }),
+        ResponseOutputItem::Reasoning { .. } => None,
+    });
+    let text = if response.output_text.is_empty() {
+        refusal.clone().unwrap_or_default()
+    } else {
+        response.output_text.clone()
+    };
+    crate::sim::canonical::CanonicalTurn {
+        role: "assistant".to_string(),
+        content: crate::sim::canonical::CanonicalContent::Text(text),
+        name: None,
+        tool_call_id: None,
+        tool_calls: None,
+        function_call: None,
+        audio: None,
+        refusal,
+    }
+}
+
 async fn get_response(
     State(state): State<AppState>,
     Path(response_id): Path<String>,
@@ -623,13 +681,6 @@ fn validate_response_request(request: &CreateResponseRequest) -> Result<(), ApiE
             "Invalid value for 'input': expected non-empty input.",
         )
         .with_param("input"));
-    }
-    if request.previous_response_id.is_some() {
-        return Err(ApiError::invalid_request(
-            "Responses continuation is not implemented in this release.",
-        )
-        .with_param("previous_response_id")
-        .with_code("unsupported_parameter"));
     }
     if !request.tools.is_empty() {
         return Err(ApiError::invalid_request(

@@ -7,6 +7,7 @@ use tokio::sync::RwLock;
 
 use crate::model::{ChatCompletionDeleted, ChatCompletionResponse, StoredMessage};
 use crate::responses::{ResponseDeleted, ResponseObject};
+use crate::sim::canonical::CanonicalTurn;
 
 #[derive(Debug, Clone, Default)]
 pub struct ListFilters {
@@ -21,7 +22,13 @@ pub struct CompletionStore {
 
 #[derive(Clone, Default)]
 pub struct ResponseStore {
-    inner: Arc<RwLock<IndexMap<String, ResponseObject>>>,
+    inner: Arc<RwLock<IndexMap<String, StoredResponse>>>,
+}
+
+#[derive(Clone)]
+pub struct StoredResponse {
+    pub response: ResponseObject,
+    pub turns: Vec<CanonicalTurn>,
 }
 
 impl ResponseStore {
@@ -29,12 +36,22 @@ impl ResponseStore {
         Self::default()
     }
 
-    pub async fn save(&self, response: ResponseObject) {
+    pub async fn save(&self, response: ResponseObject, turns: Vec<CanonicalTurn>) {
         let mut guard = self.inner.write().await;
-        guard.entry(response.id.clone()).or_insert(response);
+        guard
+            .entry(response.id.clone())
+            .or_insert(StoredResponse { response, turns });
     }
 
     pub async fn get(&self, id: &str) -> Option<ResponseObject> {
+        self.inner
+            .read()
+            .await
+            .get(id)
+            .map(|stored| stored.response.clone())
+    }
+
+    pub async fn get_stored(&self, id: &str) -> Option<StoredResponse> {
         self.inner.read().await.get(id).cloned()
     }
 
@@ -43,8 +60,8 @@ impl ResponseStore {
             .write()
             .await
             .shift_remove(id)
-            .map(|response| ResponseDeleted {
-                id: response.id,
+            .map(|stored| ResponseDeleted {
+                id: stored.response.id,
                 object: "response",
                 deleted: true,
             })
@@ -306,9 +323,9 @@ mod tests {
     async fn responses_are_immutable_and_delete_is_explicit() {
         let store = ResponseStore::new();
         let mut first = sample_response_object("resp_test");
-        store.save(first.clone()).await;
+        store.save(first.clone(), Vec::new()).await;
         first.model = "changed-model".to_string();
-        store.save(first).await;
+        store.save(first, Vec::new()).await;
 
         assert_eq!(store.get("resp_test").await.unwrap().model, "test-model");
         assert_eq!(

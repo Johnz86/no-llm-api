@@ -129,10 +129,7 @@ async fn schema_mismatch_uses_the_common_error_envelope() {
 
 #[tokio::test]
 async fn unsupported_future_controls_fail_explicitly() {
-    for (field, value) in [
-        ("previous_response_id", json!("resp_parent")),
-        ("tools", json!([{"type": "function"}])),
-    ] {
+    for (field, value) in [("tools", json!([{"type": "function"}]))] {
         let fixture = fixture(1_000);
         let mut body = json!({
             "model": "mock-reasoner",
@@ -217,6 +214,131 @@ async fn stateless_responses_are_not_retrievable() {
     )
     .await;
     assert_eq!(status, 404);
+}
+
+#[tokio::test]
+async fn stored_predecessor_continues_the_canonical_turn_sequence() {
+    let fixture = fixture(10_000);
+    let (status, _, parent_text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": "Summarize the release in one paragraph.",
+            "store": true
+        })),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let parent: Value = serde_json::from_str(&parent_text).unwrap();
+
+    let (status, headers, child_text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": "Correction: use exactly five words.",
+            "previous_response_id": parent["id"],
+            "store": true
+        })),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let child: Value = serde_json::from_str(&child_text).unwrap();
+    assert_eq!(headers["x-simulate-match"], "exact");
+    assert_eq!(child["previous_response_id"], parent["id"]);
+    assert_eq!(
+        child["output_text"],
+        "Release validated; deployment is ready."
+    );
+    assert!(
+        child["usage"]["input_tokens"].as_u64().unwrap()
+            > parent["usage"]["total_tokens"].as_u64().unwrap()
+    );
+
+    let (status, _, retrieved) = send(
+        fixture.app,
+        "GET",
+        &format!("/v1/responses/{}", child["id"].as_str().unwrap()),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(serde_json::from_str::<Value>(&retrieved).unwrap(), child);
+}
+
+#[tokio::test]
+async fn continuation_requires_an_available_stored_predecessor() {
+    let fixture = fixture(10_000);
+    let (status, _, text) = send(
+        fixture.app,
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": "Correction: use exactly five words.",
+            "previous_response_id": "resp_missing"
+        })),
+    )
+    .await;
+
+    assert_eq!(status, 404);
+    let response = assert_error_envelope(&text);
+    assert_eq!(response["error"]["param"], "previous_response_id");
+    assert_eq!(response["error"]["code"], "previous_response_not_found");
+}
+
+#[tokio::test]
+async fn concurrent_identical_continuations_produce_one_immutable_child() {
+    let fixture = fixture(10_000);
+    let (_, _, parent_text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": "Summarize the release in one paragraph.",
+            "store": true
+        })),
+    )
+    .await;
+    let parent: Value = serde_json::from_str(&parent_text).unwrap();
+    let body = json!({
+        "model": "mock-gpt-4o",
+        "input": "Correction: use exactly five words.",
+        "previous_response_id": parent["id"],
+        "store": true
+    });
+    let tasks = (0..64).map(|_| {
+        send(
+            fixture.app.clone(),
+            "POST",
+            "/v1/responses",
+            Some(body.clone()),
+        )
+    });
+    let results = futures::future::join_all(tasks).await;
+    let bodies: std::collections::BTreeSet<_> = results
+        .into_iter()
+        .map(|(status, _, body)| {
+            assert_eq!(status, 200);
+            body
+        })
+        .collect();
+
+    assert_eq!(bodies.len(), 1);
+    let child: Value = serde_json::from_str(bodies.first().unwrap()).unwrap();
+    let (status, _, retrieved) = send(
+        fixture.app,
+        "GET",
+        &format!("/v1/responses/{}", child["id"].as_str().unwrap()),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(serde_json::from_str::<Value>(&retrieved).unwrap(), child);
 }
 
 #[tokio::test]

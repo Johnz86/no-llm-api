@@ -22,8 +22,8 @@ The locked official client reconstructs text, public summaries, structured outpu
 events. Responses output budgets consume reasoning before visible output, use tokenizer-derived
 usage, and terminate incomplete streams through the same event state machine. Milestones T5 and T6
 remain in progress/future work. T5 currently provides immutable process-local storage, retrieval,
-and deletion; continuation, conversation state, tools, and control-plane diagnostics are not
-implemented yet.
+deletion, and counter-free `previous_response_id` continuation with cumulative input accounting;
+conversation state, tools, and control-plane diagnostics are not implemented yet.
 
 The first future delivery stays text-first. It establishes the shared item model, deterministic
 reasoning policy, state transitions, scenario vocabulary, and validation rules that later tool,
@@ -575,8 +575,9 @@ Exit: streamed and non-streamed semantic objects are equivalent for the full sce
 
 ### T5: Continuation and conversation state
 
-Status: immutable process-local response storage, retrieval, and deletion complete; continuation,
-conversation logs, diagnostics, expiry, branching, and concurrency semantics pending.
+Status: immutable process-local response storage, retrieval, deletion, and deterministic predecessor
+continuation complete; conversation logs, diagnostics, expiry, and conversation-id semantics
+pending.
 
 - add response store, `previous_response_id`, conversation logs, replayed items, reset/deletion,
   deterministic expiry scenarios, branching, and concurrency semantics;

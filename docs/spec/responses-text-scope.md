@@ -108,9 +108,11 @@ and the parsed value separately so byte reconstruction and semantic validation r
   pre-response fault checks. `GET /v1/responses/{response_id}` retrieves the exact object and
   `DELETE` returns `{id, object: "response", deleted: true}`; stateless responses are not
   retrievable.
-- `previous_response_id` requires an immutable stored predecessor. A response created with
-  `store: false` is continued by replaying all prior output items, including opaque encrypted
-  reasoning where present.
+- `previous_response_id` requires an available immutable stored predecessor. The predecessor's
+  canonical turns are prepended for semantic matching and its complete public object participates
+  in child plan identity, so branches require no counters or request ordering. Missing and deleted
+  predecessors fail before planning with `previous_response_not_found`. A `store: false` response
+  is stateless and cannot be referenced by id.
 - Explicit case and variant selection is a public mock-only test control through
   `X-Simulate-Case`, `X-Simulate-Variant`, and matching `x_simulate` request members. It never skips
   protocol validation and never exists on a proxied upstream request.

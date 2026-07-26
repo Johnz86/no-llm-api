@@ -21,6 +21,8 @@ pub struct CanonicalRequest {
     pub stream: bool,
     pub store: bool,
     pub seed: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -91,6 +93,7 @@ impl CanonicalRequest {
             stream: request.stream,
             store: request.store.unwrap_or(false),
             seed: request.seed,
+            context: None,
         }
     }
 

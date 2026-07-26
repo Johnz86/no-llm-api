@@ -253,6 +253,15 @@ pub fn render_response(
     plan: &SemanticResponsePlan,
     tokenizer: &CoreBPE,
 ) -> ResponseObject {
+    render_response_with_context(request, plan, tokenizer, 0)
+}
+
+pub fn render_response_with_context(
+    request: &CreateResponseRequest,
+    plan: &SemanticResponsePlan,
+    tokenizer: &CoreBPE,
+    prior_input_tokens: u32,
+) -> ResponseObject {
     let digest = u64::from_str_radix(&plan.plan_digest, 16)
         .expect("semantic plan digest is a hexadecimal u64");
     let identity = Identity::derive(digest, IdentityMode::Derived, &SystemClock);
@@ -327,18 +336,21 @@ pub fn render_response(
         });
     }
 
-    let input_tokens = request
-        .canonical_request()
-        .turns
-        .iter()
-        .map(|turn| match &turn.content {
-            CanonicalContent::Text(text) => tokenizer.encode_with_special_tokens(text).len() as u32,
-            CanonicalContent::Empty => 0,
-            CanonicalContent::Parts(value) => tokenizer
-                .encode_with_special_tokens(&value.to_string())
-                .len() as u32,
-        })
-        .sum();
+    let input_tokens = prior_input_tokens
+        + request
+            .canonical_request()
+            .turns
+            .iter()
+            .map(|turn| match &turn.content {
+                CanonicalContent::Text(text) => {
+                    tokenizer.encode_with_special_tokens(text).len() as u32
+                }
+                CanonicalContent::Empty => 0,
+                CanonicalContent::Parts(value) => tokenizer
+                    .encode_with_special_tokens(&value.to_string())
+                    .len() as u32,
+            })
+            .sum::<u32>();
     let visible_tokens: u32 = output
         .iter()
         .map(|item| match item {
@@ -579,6 +591,7 @@ impl CreateResponseRequest {
             stream: self.stream,
             store: self.store,
             seed: None,
+            context: None,
         }
     }
 
