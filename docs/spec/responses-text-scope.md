@@ -7,6 +7,10 @@ This document freezes the Responses text contract. The repository serves the non
 [`responses-text-contract/`](responses-text-contract/) defines both that object boundary and the
 streaming target implemented in the next milestone.
 
+The locked `openai` 6.49.0 JavaScript client exercises non-streamed reasoning summaries and strict
+structured output in `e2e/responses-client.spec.ts`. The response includes the SDK-required
+`output_text` aggregation and standard response members in addition to the frozen minimal corpus.
+
 The contract is pinned to the OpenAI OpenAPI document at commit
 `5c044be3bf3a42854e99e34616564eeb2124a317` from 2026-07-23, full-document SHA-256
 `b58d6cd94c881bdfd6a940bdc4db009e2c9b455accf8fd6a8b712458bc30c0da`. The first official-client

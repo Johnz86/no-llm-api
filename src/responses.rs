@@ -126,18 +126,23 @@ pub struct ResponseObject {
     pub id: String,
     pub object: &'static str,
     pub created_at: i64,
+    pub output_text: String,
     pub completed_at: Option<i64>,
     pub status: ResponseStatus,
     pub error: Option<Value>,
     pub incomplete_details: Option<Value>,
+    pub instructions: Option<Value>,
     pub model: String,
     pub output: Vec<ResponseOutputItem>,
     pub parallel_tool_calls: bool,
+    pub temperature: Option<f32>,
+    pub tool_choice: Value,
     pub previous_response_id: Option<String>,
     pub reasoning: Option<ResponseReasoningConfig>,
     pub store: bool,
     pub text: ResponseTextSettings,
     pub tools: Vec<Value>,
+    pub top_p: Option<f32>,
     pub usage: ResponseUsage,
     pub metadata: Map<String, Value>,
 }
@@ -334,22 +339,39 @@ pub fn render_response(
             .unwrap_or(0)
     };
     let output_tokens = visible_tokens + reasoning_tokens;
+    let output_text = output
+        .iter()
+        .filter_map(|item| match item {
+            ResponseOutputItem::Message { content, .. } => Some(content),
+            ResponseOutputItem::Reasoning { .. } => None,
+        })
+        .flatten()
+        .filter_map(|part| match part {
+            ResponseContentPart::OutputText { text, .. } => Some(text.as_str()),
+            ResponseContentPart::Refusal { .. } => None,
+        })
+        .collect();
     ResponseObject {
         id,
         object: "response",
         created_at: identity.created,
+        output_text,
         completed_at: (status == ResponseStatus::Completed).then_some(identity.created + 1),
         status,
         error: None,
         incomplete_details: None,
+        instructions: None,
         model: request.model.clone(),
         output,
         parallel_tool_calls: request.parallel_tool_calls,
+        temperature: None,
+        tool_choice: Value::String("auto".to_string()),
         previous_response_id: request.previous_response_id.clone(),
         reasoning: request.reasoning.clone(),
         store: request.store,
         text: response_text_settings(request.text.as_ref()),
         tools: request.tools.clone(),
+        top_p: None,
         usage: ResponseUsage {
             input_tokens,
             input_tokens_details: ResponseInputTokensDetails {

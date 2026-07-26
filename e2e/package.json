@@ -6,6 +6,7 @@
     "test:open-webui": "playwright test --config open-webui.config.ts"
   },
   "devDependencies": {
-    "@playwright/test": "1.62.0"
+    "@playwright/test": "1.62.0",
+    "openai": "6.49.0"
   }
 }

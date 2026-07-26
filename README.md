@@ -333,13 +333,15 @@ pagination for the lifetime of the process.
 
 - `cargo test` exercises dataset helpers, service logic, store behaviour, the HTTP surface
   (`tests/http_api.rs`), the SSE transcript contract (`tests/sse.rs`) and the async-openai client
-  contract (`tests/async_openai.rs`). No environment variables and no network access are required.
+  contract (`tests/async_openai.rs`). No environment variables and no upstream network access are
+  required.
 - `tests/support/sse.rs` is the shared transcript parser and assertion harness: exactly one trailing
   `[DONE]`, one `finish_reason` on the last chunk carrying a choice, stable chunk ids, usage-frame
   position, and median inter-frame pacing.
-- `npm --prefix e2e test` starts the server and drives the embedded page in Chromium. It verifies
-  incremental rendering, the exact final fixture text, browser-console hygiene, and API-error display.
-  Install the browser once with `npx --prefix e2e playwright install chromium`.
+- `npm --prefix e2e test` starts the server, drives the embedded page in Chromium, and exercises
+  non-streamed Responses with the locked official JavaScript client. It verifies incremental
+  rendering, exact fixture text, browser-console hygiene, API errors, reasoning summaries, and
+  structured output. Install the browser once with `npx --prefix e2e playwright install chromium`.
 - `no-llm-api health --url http://127.0.0.1:8080/ready` is the dependency-free readiness probe
   used by the distroless image, where `curl` is unavailable.
 - `bash scripts/smoke-open-webui.sh` boots the real Compose stack, verifies that Open WebUI's model
