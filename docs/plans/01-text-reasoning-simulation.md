@@ -19,8 +19,9 @@ path schedules typed, contiguous, reasoning-first SSE events with deterministic 
 cancellation. Authored fixtures cover refusal plus completed, incomplete, failed, and cancelled
 lifecycles, while endpoint tests cover staged errors, deliberate drops, and consumer cancellation.
 The locked official client reconstructs text, public summaries, structured output, and refusals from
-events. Milestones T5 and T6 remain future work; Responses state, tools, and control-plane
-diagnostics are not implemented yet.
+events. Responses output budgets consume reasoning before visible output, use tokenizer-derived
+usage, and terminate incomplete streams through the same event state machine. Milestones T5 and T6
+remain future work; Responses state, tools, and control-plane diagnostics are not implemented yet.
 
 The first future delivery stays text-first. It establishes the shared item model, deterministic
 reasoning policy, state transitions, scenario vocabulary, and validation rules that later tool,

@@ -133,7 +133,6 @@ async fn unsupported_future_controls_fail_explicitly() {
         ("store", json!(true)),
         ("previous_response_id", json!("resp_parent")),
         ("tools", json!([{"type": "function"}])),
-        ("max_output_tokens", json!(10)),
     ] {
         let fixture = fixture(1_000);
         let mut body = json!({
@@ -147,6 +146,73 @@ async fn unsupported_future_controls_fail_explicitly() {
         assert_eq!(response["error"]["param"], field);
         assert_eq!(response["error"]["code"], "unsupported_parameter");
     }
+}
+
+#[tokio::test]
+async fn output_budget_is_spent_on_reasoning_before_visible_text() {
+    for (limit, expected_reasoning, expect_text) in
+        [(16, 16, false), (28, 28, false), (30, 28, true)]
+    {
+        let fixture = fixture(10_000);
+        let transcript = collect_sse_at(
+            fixture.app,
+            "/v1/responses",
+            json!({
+                "model": "mock-reasoner",
+                "input": "Which release should ship?",
+                "reasoning": {"effort": "high", "summary": "auto"},
+                "max_output_tokens": limit,
+                "stream": true
+            }),
+        )
+        .await;
+        let events = transcript.chunks();
+        let terminal = &events.last().unwrap()["response"];
+        let output_text = terminal["output_text"].as_str().unwrap();
+
+        assert_eq!(events.last().unwrap()["type"], "response.incomplete");
+        assert_eq!(terminal["status"], "incomplete");
+        assert_eq!(
+            terminal["incomplete_details"]["reason"],
+            "max_output_tokens"
+        );
+        assert_eq!(terminal["max_output_tokens"], limit);
+        assert_eq!(
+            terminal["usage"]["output_tokens_details"]["reasoning_tokens"],
+            expected_reasoning
+        );
+        assert_eq!(terminal["usage"]["output_tokens"], limit);
+        assert_eq!(!output_text.is_empty(), expect_text);
+        assert!("Ship release B.".starts_with(output_text));
+
+        let streamed_text: String = events
+            .iter()
+            .filter(|event| event["type"] == "response.output_text.delta")
+            .map(|event| event["delta"].as_str().unwrap())
+            .collect();
+        assert_eq!(streamed_text, output_text);
+    }
+}
+
+#[tokio::test]
+async fn output_budget_below_the_schema_minimum_is_rejected() {
+    let fixture = fixture(10_000);
+    let (status, _, text) = send(
+        fixture.app,
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-reasoner",
+            "input": "Which release should ship?",
+            "max_output_tokens": 15
+        })),
+    )
+    .await;
+
+    assert_eq!(status, 400);
+    let response = assert_error_envelope(&text);
+    assert_eq!(response["error"]["param"], "max_output_tokens");
+    assert_eq!(response["error"]["code"], "invalid_value");
 }
 
 #[tokio::test]

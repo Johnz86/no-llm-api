@@ -612,12 +612,12 @@ fn validate_response_request(request: &CreateResponseRequest) -> Result<(), ApiE
         .with_param("tools")
         .with_code("unsupported_parameter"));
     }
-    if request.max_output_tokens.is_some() {
+    if request.max_output_tokens.is_some_and(|limit| limit < 16) {
         return Err(ApiError::invalid_request(
-            "Responses output limits are not implemented in this release.",
+            "Invalid value for 'max_output_tokens': must be at least 16.",
         )
         .with_param("max_output_tokens")
-        .with_code("unsupported_parameter"));
+        .with_code("invalid_value"));
     }
     Ok(())
 }

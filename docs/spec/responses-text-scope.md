@@ -55,6 +55,11 @@ Effort is validated against a model capability profile. An exact authored effort
 then an explicitly declared fixture fallback. If neither exists, planning fails with a fixture
 coverage error; the simulator never fabricates a more or less capable answer.
 
+`max_output_tokens` accepts the pinned schema minimum of 16. Reasoning tokens consume the budget
+before visible text or refusal tokens. Exhaustion truncates only on tokenizer boundaries, updates
+usage to the emitted budget, marks output items incomplete, and terminates the response with
+`incomplete_details.reason = "max_output_tokens"` in object and streamed forms.
+
 ## Normal event state machine
 
 Every event carries a zero-based, contiguous `sequence_number`. A normal stream has one

@@ -10,6 +10,7 @@ use crate::sim::identity::{Identity, IdentityMode, SystemClock};
 use crate::sim::plan::{SemanticOutput, SemanticResponsePlan};
 use crate::sim::script::Interface;
 use crate::sim::script::TerminalStatus;
+use crate::sim::stream::token_pieces;
 
 pub const RESPONSES_SCHEMA_REVISION: &str = "responses-2026-07-23";
 
@@ -132,6 +133,7 @@ pub struct ResponseObject {
     pub error: Option<Value>,
     pub incomplete_details: Option<Value>,
     pub instructions: Option<Value>,
+    pub max_output_tokens: Option<u32>,
     pub model: String,
     pub output: Vec<ResponseOutputItem>,
     pub parallel_tool_calls: bool,
@@ -249,7 +251,12 @@ pub fn render_response(
     let identity = Identity::derive(digest, IdentityMode::Derived, &SystemClock);
     let suffix = identity.id.trim_start_matches("chatcmpl-");
     let id = format!("resp_{suffix}");
-    let status = terminal_status(plan.terminal);
+    let budget = budget_outputs(request.max_output_tokens, plan, tokenizer);
+    let status = if budget.exhausted && plan.terminal == TerminalStatus::Completed {
+        ResponseStatus::Incomplete
+    } else {
+        terminal_status(plan.terminal)
+    };
     let item_status = if status == ResponseStatus::Completed {
         ResponseItemStatus::Completed
     } else {
@@ -259,7 +266,7 @@ pub fn render_response(
     let mut message_parts = Vec::new();
     let mut summary_text = None;
     let mut encrypted_content = None;
-    for node in &plan.output {
+    for node in &budget.output {
         match node {
             SemanticOutput::Reasoning {
                 summary, encrypted, ..
@@ -342,14 +349,7 @@ pub fn render_response(
             ResponseOutputItem::Reasoning { .. } => 0,
         })
         .sum();
-    let reasoning_tokens = if plan.usage.reasoning_tokens > 0 {
-        plan.usage.reasoning_tokens
-    } else {
-        summary_text
-            .as_deref()
-            .map(|text| tokenizer.encode_with_special_tokens(text).len() as u32)
-            .unwrap_or(0)
-    };
+    let reasoning_tokens = budget.reasoning_tokens;
     let output_tokens = visible_tokens + reasoning_tokens;
     let output_text = output
         .iter()
@@ -373,6 +373,7 @@ pub fn render_response(
         error: response_error(status),
         incomplete_details: incomplete_details(status),
         instructions: None,
+        max_output_tokens: request.max_output_tokens,
         model: request.model.clone(),
         output,
         parallel_tool_calls: request.parallel_tool_calls,
@@ -396,6 +397,122 @@ pub fn render_response(
         },
         metadata: request.metadata.clone(),
     }
+}
+
+struct ResponseBudget {
+    output: Vec<SemanticOutput>,
+    reasoning_tokens: u32,
+    exhausted: bool,
+}
+
+fn budget_outputs(
+    cap: Option<u32>,
+    plan: &SemanticResponsePlan,
+    tokenizer: &CoreBPE,
+) -> ResponseBudget {
+    let full_reasoning_tokens = if plan.usage.reasoning_tokens > 0 {
+        plan.usage.reasoning_tokens
+    } else {
+        plan.output
+            .iter()
+            .find_map(|node| match node {
+                SemanticOutput::Reasoning { summary, .. } => summary.as_deref(),
+                _ => None,
+            })
+            .map(|text| tokenizer.encode_with_special_tokens(text).len() as u32)
+            .unwrap_or(0)
+    };
+    let visible_tokens: u32 = plan
+        .output
+        .iter()
+        .map(|node| match node {
+            SemanticOutput::Text { text }
+            | SemanticOutput::Refusal { text }
+            | SemanticOutput::Structured { json: text, .. } => {
+                tokenizer.encode_with_special_tokens(text).len() as u32
+            }
+            SemanticOutput::Reasoning { .. } => 0,
+        })
+        .sum();
+    let full_tokens = full_reasoning_tokens + visible_tokens;
+    let Some(cap) = cap.filter(|cap| *cap < full_tokens) else {
+        return ResponseBudget {
+            output: plan.output.clone(),
+            reasoning_tokens: full_reasoning_tokens,
+            exhausted: false,
+        };
+    };
+
+    let reasoning_tokens = full_reasoning_tokens.min(cap);
+    let mut remaining = cap.saturating_sub(reasoning_tokens);
+    let output = plan
+        .output
+        .iter()
+        .filter_map(|node| match node {
+            SemanticOutput::Reasoning {
+                summary,
+                trace,
+                encrypted,
+            } => Some(SemanticOutput::Reasoning {
+                summary: truncate_reasoning_summary(
+                    summary.as_deref(),
+                    reasoning_tokens,
+                    full_reasoning_tokens,
+                    tokenizer,
+                ),
+                trace: trace.clone(),
+                encrypted: (reasoning_tokens == full_reasoning_tokens)
+                    .then(|| encrypted.clone())
+                    .flatten(),
+            }),
+            SemanticOutput::Text { text } => take_visible(text, &mut remaining, tokenizer)
+                .map(|text| SemanticOutput::Text { text }),
+            SemanticOutput::Refusal { text } => take_visible(text, &mut remaining, tokenizer)
+                .map(|text| SemanticOutput::Refusal { text }),
+            SemanticOutput::Structured { json, value } => {
+                take_visible(json, &mut remaining, tokenizer).map(|json| {
+                    SemanticOutput::Structured {
+                        json,
+                        value: value.clone(),
+                    }
+                })
+            }
+        })
+        .collect();
+    ResponseBudget {
+        output,
+        reasoning_tokens,
+        exhausted: true,
+    }
+}
+
+fn truncate_reasoning_summary(
+    summary: Option<&str>,
+    used_tokens: u32,
+    full_tokens: u32,
+    tokenizer: &CoreBPE,
+) -> Option<String> {
+    let summary = summary?;
+    if used_tokens == 0 {
+        return None;
+    }
+    if used_tokens >= full_tokens || full_tokens == 0 {
+        return Some(summary.to_string());
+    }
+    let tokens = tokenizer.encode_with_special_tokens(summary);
+    let used =
+        ((tokens.len() as u64 * u64::from(used_tokens)).div_ceil(u64::from(full_tokens))) as usize;
+    Some(token_pieces(tokenizer, &tokens[..used.max(1)]).concat())
+}
+
+fn take_visible(text: &str, remaining: &mut u32, tokenizer: &CoreBPE) -> Option<String> {
+    if *remaining == 0 {
+        return None;
+    }
+    let tokens = tokenizer.encode_with_special_tokens(text);
+    let used = (*remaining as usize).min(tokens.len());
+    *remaining -= used as u32;
+    Some(token_pieces(tokenizer, &tokens[..used]).concat())
 }
 
 fn terminal_status(status: TerminalStatus) -> ResponseStatus {
