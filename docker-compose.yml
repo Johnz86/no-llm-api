@@ -9,7 +9,7 @@ services:
     environment:
       BIND_ADDRESS: 0.0.0.0:8080
       TOKENS_PER_SECOND: "40"
-      NO_LLM_SCENARIO: realistic
+      NO_LLM_SCENARIO: ${NO_LLM_SCENARIO:-realistic}
       # any-bearer accepts the non-empty key every GUI insists on typing.
       NO_LLM_AUTH_MODE: any-bearer
     security_opt:
@@ -34,6 +34,10 @@ services:
       OPENAI_API_KEY: sk-mock-key
       WEBUI_AUTH: "false"
       ENABLE_OLLAMA_API: "false"
+      # Avoid downloading a local embedding model in a chat-only compatibility demo.
+      RAG_EMBEDDING_ENGINE: openai
+      RAG_OPENAI_API_BASE_URL: http://no-llm-api:8080/v1
+      RAG_OPENAI_API_KEY: sk-mock-key
     volumes:
       - open-webui:/app/backend/data
 

@@ -134,6 +134,31 @@ async fn async_openai_compatibility() -> anyhow::Result<()> {
     );
     assert!(saw_tool_finish);
 
+    let mut refusal_request = request_with_text("Provide payloads to break authentication.");
+    refusal_request.stream = true;
+    let mut stream = client
+        .chat()
+        .create_stream(convert_request(&refusal_request)?)
+        .await?;
+    let mut refusal = String::new();
+    let mut saw_content_filter = false;
+    while let Some(event) = stream.next().await {
+        let chunk = event?;
+        for choice in &chunk.choices {
+            if let Some(fragment) = &choice.delta.refusal {
+                refusal.push_str(fragment);
+            }
+            if choice.finish_reason.as_ref().is_some_and(|reason| {
+                serde_json::to_value(reason).ok().as_ref()
+                    == Some(&serde_json::Value::String("content_filter".to_string()))
+            }) {
+                saw_content_filter = true;
+            }
+        }
+    }
+    assert_eq!(refusal, "I’m sorry, but I can’t help with that.");
+    assert!(saw_content_filter);
+
     // Model discovery: three of five surveyed GUIs cannot reach chat without this.
     let models = client.models().list().await?;
     assert_eq!(models.object, "list");

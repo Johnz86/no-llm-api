@@ -272,6 +272,10 @@ origin and the requested headers, so SDK-specific headers never need an allow-li
   Install the browser once with `npx --prefix e2e playwright install chromium`.
 - `no-llm-api health --url http://127.0.0.1:8080/ready` is the dependency-free readiness probe
   used by the distroless image, where `curl` is unavailable.
+- `bash scripts/smoke-open-webui.sh` boots the real Compose stack, verifies that Open WebUI's model
+  selector discovers the mock, and incrementally renders the exact fixture answer. The same
+  check runs weekly and on demand in the Open WebUI compatibility workflow because its image is
+  too large for every pull-request job.
 
 ## Notes
 

@@ -2,7 +2,8 @@
   "name": "no-llm-api-e2e",
   "private": true,
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test",
+    "test:open-webui": "playwright test --config open-webui.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.62.0"

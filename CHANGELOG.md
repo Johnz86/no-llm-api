@@ -53,6 +53,8 @@ configuration surface moved.
 - A Playwright browser suite that boots the server and verifies incremental SSE rendering and
   spec-shaped error display in the embedded demo page.
 - A dependency-free `health --url` command and container healthcheck suitable for the distroless image.
+- A scheduled and manually dispatchable Open WebUI compatibility smoke that verifies model
+  discovery and an exact streamed answer through Open WebUI's own API proxy.
 
 ### Changed
 
@@ -76,3 +78,5 @@ configuration surface moved.
 - The Docker build now includes the YAML files embedded by the fixture module.
 - The dependency-policy configuration now handles the intentionally private root crate, Arrow's
   CC0 dependency, and Parquet's unavoidable archived `paste` dependency explicitly.
+- The real `async-openai` contract now covers streamed refusal deltas and the `content_filter`
+  terminal reason, and CI executes the all-feature test suite on both supported operating systems.

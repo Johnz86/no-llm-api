@@ -409,3 +409,5 @@ Never run locally as part of the normal loop (costs money, hits the network):
 
 Item 12 is complete. The suite also intercepts a spec-shaped HTTP failure and verifies that the
 embedded client displays its message rather than feeding the JSON error envelope to the SSE parser.
+The separate Open WebUI compatibility workflow drives the real third-party GUI weekly and on demand,
+because downloading its multi-gigabyte rolling image for every pull request is impractical.

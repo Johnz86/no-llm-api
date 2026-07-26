@@ -56,11 +56,13 @@ the Playwright browser suite, a running server, and a distroless container.
 | `de86d6d` | M4 | R36, R37 |
 | `fe06e51` | M5 | R47 |
 | `8b92279` | M5 | R46 |
-| current change | M5 | R48 |
+| `377d3b8` | M5 | R48 |
 
 All roadmap items are delivered. R48 drives the embedded page in Chromium, verifies that streamed
 text grows before reaching the exact fixture answer, checks browser-console hygiene, and covers
 spec-shaped HTTP error display. It remains separate from `cargo test` and runs in its own CI job.
+The real Open WebUI Compose integration runs weekly and on demand: Playwright asserts model
+discovery, incremental rendering, the exact fixture answer, and browser-console hygiene.
 
 ## Critical path
 

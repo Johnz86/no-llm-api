@@ -49,6 +49,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --locked --all-targets
       - run: cargo test --locked --all-targets
+      - run: cargo test --locked --all-targets --all-features
       - run: cargo test --locked --doc
 
   browser-e2e:
