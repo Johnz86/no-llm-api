@@ -23,7 +23,10 @@ use crate::http::metrics::Metrics;
 use crate::model::{ChatCompletionList, ChatCompletionMessageList, ChatCompletionRequest};
 use crate::models::ModelCatalogue;
 use crate::service::ChatService;
+use crate::service::SemanticDiagnostics;
+use crate::sim::canonical::CanonicalRequest;
 use crate::sim::directive::Directive;
+use crate::sim::plan::{PlanError, SelectionControls, SemanticCapabilities};
 use crate::sim::scenario::{FaultKind, Scenario, Timing};
 use crate::sim::stream::{CancelCounter, StreamPlan, sse_stream};
 use crate::store::{ListFilters, SortOrder};
@@ -35,6 +38,10 @@ const REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
 const ACCEL_BUFFERING: HeaderName = HeaderName::from_static("x-accel-buffering");
 /// Which rung of the matching ladder produced the reply; for test triage only.
 const SIMULATE_MATCH: HeaderName = HeaderName::from_static("x-simulate-match");
+const SIMULATE_DATASET: HeaderName = HeaderName::from_static("x-simulate-dataset-revision");
+const SIMULATE_CASE: HeaderName = HeaderName::from_static("x-simulate-case");
+const SIMULATE_VARIANT: HeaderName = HeaderName::from_static("x-simulate-variant");
+const SIMULATE_PLAN: HeaderName = HeaderName::from_static("x-simulate-plan-digest");
 /// Which build answered, so a CI job can assert it talked to the container it meant to.
 const VERSION_HEADER: HeaderName = HeaderName::from_static("x-no-llm-api-version");
 
@@ -230,6 +237,11 @@ fn cors_layer(settings: &CorsSettings) -> CorsLayer {
             HeaderName::from_static("x-ratelimit-limit-requests"),
             HeaderName::from_static("x-ratelimit-remaining-requests"),
             HeaderName::from_static("x-ratelimit-reset-requests"),
+            SIMULATE_MATCH,
+            SIMULATE_DATASET,
+            SIMULATE_CASE,
+            SIMULATE_VARIANT,
+            SIMULATE_PLAN,
         ]))
         .max_age(Duration::from_secs(600))
 }
@@ -393,8 +405,32 @@ async fn create_chat_completion(
     let (timing, fault) = directive.apply(&effective_scenario);
 
     let stream = request.stream;
-    let prepared = state.service.create_completion(request).await?;
-    let match_kind = HeaderValue::from_static(prepared.match_kind.as_str());
+    let prepared = if directive.case.is_some() || directive.variant.is_some() {
+        let profile = state
+            .models
+            .profile(&request.model)
+            .ok_or_else(|| ApiError::model_not_found(&request.model))?;
+        let controls = SelectionControls {
+            case: directive.case.clone(),
+            variant: directive.variant.clone(),
+            ..Default::default()
+        };
+        let plan = crate::sim::plan::compile(
+            &crate::sim::script::builtin_fixtures(),
+            &CanonicalRequest::from_chat(&request),
+            &controls,
+            &SemanticCapabilities::from(profile),
+        )
+        .map_err(semantic_plan_error)?;
+        state
+            .service
+            .create_semantic_completion(request, &plan)
+            .await?
+    } else {
+        state.service.create_completion(request).await?
+    };
+    let match_kind = HeaderValue::from_str(&prepared.match_kind)
+        .expect("simulation match kinds are valid header values");
     let plan_seed = state.seed ^ plan_seed_of(&prepared.response.id);
 
     // An http_error fault answers before any streaming starts, the way a real
@@ -408,9 +444,11 @@ async fn create_chat_completion(
     if !stream {
         let mut response = Json(prepared.response.lean()).into_response();
         response.headers_mut().insert(&SIMULATE_MATCH, match_kind);
+        insert_semantic_headers(response.headers_mut(), prepared.semantic.as_ref());
         return Ok(response);
     }
 
+    let semantic = prepared.semantic.clone();
     let plan = StreamPlan::with_profile(
         prepared,
         state.service.tokenizer().as_ref(),
@@ -435,7 +473,46 @@ async fn create_chat_completion(
     let response_headers = response.headers_mut();
     response_headers.insert(&ACCEL_BUFFERING, HeaderValue::from_static("no"));
     response_headers.insert(&SIMULATE_MATCH, match_kind);
+    insert_semantic_headers(response_headers, semantic.as_ref());
     Ok(response)
+}
+
+fn insert_semantic_headers(
+    headers: &mut axum::http::HeaderMap,
+    diagnostics: Option<&SemanticDiagnostics>,
+) {
+    let Some(diagnostics) = diagnostics else {
+        return;
+    };
+    for (name, value) in [
+        (&SIMULATE_DATASET, diagnostics.dataset_revision.as_str()),
+        (&SIMULATE_CASE, diagnostics.case_id.as_str()),
+        (&SIMULATE_VARIANT, diagnostics.variant_id.as_str()),
+        (&SIMULATE_PLAN, diagnostics.plan_digest.as_str()),
+    ] {
+        if let Ok(value) = HeaderValue::from_str(value) {
+            headers.insert(name, value);
+        }
+    }
+}
+
+fn semantic_plan_error(error: PlanError) -> ApiError {
+    let param = match error {
+        PlanError::UnknownCase(_) | PlanError::IncompatibleCase(_) => "x_simulate.case",
+        PlanError::UnknownVariant { .. } | PlanError::IncompatibleVariant { .. } => {
+            "x_simulate.variant"
+        }
+        PlanError::UnsupportedEffort { .. } | PlanError::MissingEffortVariant { .. } => {
+            "reasoning_effort"
+        }
+        PlanError::UnsupportedStructuredOutput(_) => "response_format",
+        PlanError::NoMatch
+        | PlanError::AmbiguousMatch(_)
+        | PlanError::InvalidStructuredOutput { .. } => "x_simulate.case",
+    };
+    ApiError::invalid_request(error.to_string())
+        .with_param(param)
+        .with_code("semantic_selection_error")
 }
 
 /// Prometheus text exposition; only mounted when --metrics is set.
