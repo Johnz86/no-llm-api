@@ -23,7 +23,7 @@
     },
     {
       "item": {
-        "encrypted_content": null,
+        "encrypted_content": "enc_c2d85e07a09d2c63",
         "id": "rs_c2d85e07a09d2c63",
         "status": "in_progress",
         "summary": [],
@@ -185,6 +185,7 @@
     },
     {
       "item": {
+        "encrypted_content": "enc_c2d85e07a09d2c63",
         "id": "rs_c2d85e07a09d2c63",
         "status": "completed",
         "summary": [
@@ -316,6 +317,7 @@
         "object": "response",
         "output": [
           {
+            "encrypted_content": "enc_c2d85e07a09d2c63",
             "id": "rs_c2d85e07a09d2c63",
             "status": "completed",
             "summary": [
@@ -399,6 +401,7 @@
     "object": "response",
     "output": [
       {
+        "encrypted_content": "enc_c2d85e07a09d2c63",
         "id": "rs_c2d85e07a09d2c63",
         "status": "completed",
         "summary": [

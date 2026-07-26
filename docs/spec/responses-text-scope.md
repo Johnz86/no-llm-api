@@ -126,6 +126,11 @@ and the parsed value separately so byte reconstruction and semantic validation r
   is stateless and cannot be referenced by id. The `state-expired` scenario keeps stored objects
   inspectable while making every continuation fail reproducibly with `previous_response_expired`;
   expiry never consults wall-clock time or mutates storage.
+- Stateless input accepts completed assistant message items and completed reasoning items emitted by
+  this simulator. Replay preserves item ids and content-part framing. Reasoning ciphertext uses the
+  opaque deterministic `enc_<plan-digest>` envelope: canonicalization hashes the envelope as an
+  indivisible string and never parses or exposes hidden reasoning. Missing, altered, duplicated, or
+  mismatched reasoning/message pairs fail against `input` before fixture selection.
 - Process-local response and conversation stores have no implicit time- or capacity-based eviction.
 - A Response associated with a conversation commits only if the conversation still has the exact
   item generation used to plan it. Overlapping writes may have one winner; every stale writer gets

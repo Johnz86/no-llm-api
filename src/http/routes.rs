@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,8 +28,9 @@ use crate::model::{ChatCompletionList, ChatCompletionMessageList, ChatCompletion
 use crate::models::ModelCatalogue;
 use crate::request_types::ResponseFormat;
 use crate::responses::{
-    CreateResponseRequest, ResponseContentPart, ResponseInput, ResponseOutputItem,
-    ResponseTextFormat, canonical_input_tokens, render_response_with_context,
+    CreateResponseRequest, ResponseContentPart, ResponseInput, ResponseInputItem,
+    ResponseItemStatus, ResponseOutputItem, ResponseRole, ResponseTextFormat,
+    canonical_input_tokens, render_response_with_context,
 };
 use crate::service::ChatService;
 use crate::service::SemanticDiagnostics;
@@ -551,7 +553,9 @@ async fn create_response(
                     .with_code("previous_response_not_found")
             })?;
         canonical.turns.splice(0..0, stored.turns.clone());
-        canonical.context = Some(
+        merge_response_context(
+            &mut canonical.context,
+            "previous_response",
             serde_json::to_value(&stored.response).expect("stored Responses objects serialize"),
         );
         Some(stored)
@@ -566,10 +570,14 @@ async fn create_response(
                 .with_code("conversation_not_found")
         })?;
         canonical.turns.splice(0..0, snapshot.turns.clone());
-        canonical.context = Some(serde_json::json!({
-            "conversation": snapshot.resource,
-            "item_ids": snapshot.item_ids,
-        }));
+        merge_response_context(
+            &mut canonical.context,
+            "conversation",
+            serde_json::json!({
+                "conversation": snapshot.resource,
+                "item_ids": snapshot.item_ids,
+            }),
+        );
         Some(snapshot)
     } else {
         None
@@ -816,6 +824,21 @@ fn response_turn(
     }
 }
 
+fn merge_response_context(
+    context: &mut Option<serde_json::Value>,
+    key: &str,
+    value: serde_json::Value,
+) {
+    *context = Some(match context.take() {
+        None => value,
+        Some(replay) => serde_json::json!({
+            "input_replay": replay,
+            "state_kind": key,
+            "state": value,
+        }),
+    });
+}
+
 async fn get_response(
     State(state): State<AppState>,
     Path(response_id): Path<String>,
@@ -851,7 +874,8 @@ fn validate_response_request(request: &CreateResponseRequest) -> Result<(), ApiE
     }
     if let ResponseInput::Items(items) = &request.input
         && items.iter().any(|item| match item {
-            crate::responses::ResponseInputItem::Message { content, .. } => content.is_empty(),
+            ResponseInputItem::Message(message) => message.content.is_empty(),
+            ResponseInputItem::Reasoning(_) => false,
         })
     {
         return Err(ApiError::invalid_request(
@@ -859,6 +883,7 @@ fn validate_response_request(request: &CreateResponseRequest) -> Result<(), ApiE
         )
         .with_param("input"));
     }
+    validate_replay_items(request)?;
     if request.metadata.len() > 16 {
         return Err(ApiError::invalid_request(
             "Invalid value for 'metadata': at most 16 entries are allowed.",
@@ -899,6 +924,116 @@ fn validate_response_request(request: &CreateResponseRequest) -> Result<(), ApiE
         .with_code("invalid_value"));
     }
     Ok(())
+}
+
+fn validate_replay_items(request: &CreateResponseRequest) -> Result<(), ApiError> {
+    let ResponseInput::Items(items) = &request.input else {
+        return Ok(());
+    };
+    let mut ids = BTreeSet::new();
+    let mut pending_reasoning_suffix = None;
+    for item in items {
+        match item {
+            ResponseInputItem::Message(message) => {
+                if message.role == ResponseRole::Assistant {
+                    let id = message.id.as_deref().ok_or_else(|| {
+                        replay_error(
+                            "Assistant replay messages require their original 'id'.",
+                            "invalid_replay_item",
+                        )
+                    })?;
+                    let suffix = id.strip_prefix("msg_").ok_or_else(|| {
+                        replay_error(
+                            "Assistant replay message ids must use the simulator 'msg_' identity.",
+                            "invalid_replay_item",
+                        )
+                    })?;
+                    if !matches!(message.status, Some(ResponseItemStatus::Completed)) {
+                        return Err(replay_error(
+                            "Assistant replay messages must have status 'completed'.",
+                            "invalid_replay_item",
+                        ));
+                    }
+                    if !matches!(
+                        message.content,
+                        crate::responses::ResponseInputContent::OutputParts(_)
+                    ) {
+                        return Err(replay_error(
+                            "Assistant replay messages require output_text or refusal content parts.",
+                            "invalid_replay_item",
+                        ));
+                    }
+                    insert_replay_id(&mut ids, id)?;
+                    if let Some(reasoning_suffix) = pending_reasoning_suffix.take()
+                        && reasoning_suffix != suffix
+                    {
+                        return Err(replay_error(
+                            "Adjacent reasoning and assistant replay items must come from the same response.",
+                            "replay_context_mismatch",
+                        ));
+                    }
+                } else if message.id.is_some()
+                    || message.status.is_some()
+                    || matches!(
+                        message.content,
+                        crate::responses::ResponseInputContent::OutputParts(_)
+                    )
+                {
+                    return Err(replay_error(
+                        "Only assistant output messages may carry replay identity and output content.",
+                        "invalid_replay_item",
+                    ));
+                }
+            }
+            ResponseInputItem::Reasoning(reasoning) => {
+                let suffix = reasoning.id.strip_prefix("rs_").ok_or_else(|| {
+                    replay_error(
+                        "Reasoning replay ids must use the simulator 'rs_' identity.",
+                        "invalid_replay_item",
+                    )
+                })?;
+                insert_replay_id(&mut ids, &reasoning.id)?;
+                if !reasoning.content.is_empty() {
+                    return Err(replay_error(
+                        "Raw reasoning_text content is not accepted for replay; use encrypted_content.",
+                        "invalid_replay_item",
+                    ));
+                }
+                if !matches!(reasoning.status, Some(ResponseItemStatus::Completed)) {
+                    return Err(replay_error(
+                        "Reasoning replay items must have status 'completed'.",
+                        "invalid_replay_item",
+                    ));
+                }
+                let expected = format!("enc_{suffix}");
+                if reasoning.encrypted_content.as_deref() != Some(expected.as_str()) {
+                    return Err(replay_error(
+                        "Reasoning replay requires the intact opaque encrypted_content emitted with that item.",
+                        "invalid_encrypted_reasoning",
+                    ));
+                }
+                pending_reasoning_suffix = Some(suffix);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn insert_replay_id(ids: &mut BTreeSet<String>, id: &str) -> Result<(), ApiError> {
+    if ids.insert(id.to_string()) {
+        Ok(())
+    } else {
+        Err(replay_error(
+            "Replay item ids must be unique within one request.",
+            "duplicate_replay_item",
+        ))
+    }
+}
+
+fn replay_error(message: &str, code: &str) -> ApiError {
+    ApiError::invalid_request(message)
+        .with_param("input")
+        .with_code(code)
 }
 
 fn validate_response_schema(

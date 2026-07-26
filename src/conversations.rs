@@ -113,7 +113,7 @@ impl ConversationStore {
                         group: "initial".to_string(),
                         ordinal: index,
                         value: input_item_value(item, &id),
-                        turn: Some(canonical_input_item(item)),
+                        turn: canonical_input_item(item),
                         reasoning_tokens: 0,
                     },
                 )
@@ -179,7 +179,7 @@ impl ConversationStore {
                     group: response.id.clone(),
                     ordinal: index,
                     value: input_item_value(&item, &item_id),
-                    turn: Some(turn),
+                    turn,
                     reasoning_tokens: 0,
                 });
         }
@@ -234,7 +234,7 @@ impl ConversationStore {
                     group: group.clone(),
                     ordinal: index,
                     value: input_item_value(item, &item_id),
-                    turn: Some(canonical_input_item(item)),
+                    turn: canonical_input_item(item),
                     reasoning_tokens: 0,
                 });
             ids.push(item_id);
@@ -363,7 +363,7 @@ fn input_item_value(item: &ResponseInputItem, id: &str) -> Value {
 
 fn response_input_items(
     request: &CreateResponseRequest,
-) -> Vec<(ResponseInputItem, CanonicalTurn)> {
+) -> Vec<(ResponseInputItem, Option<CanonicalTurn>)> {
     match &request.input {
         ResponseInput::Text(text) => {
             let item: ResponseInputItem = serde_json::from_value(json!({

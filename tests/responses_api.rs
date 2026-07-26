@@ -148,6 +148,90 @@ async fn reasoning_summary_is_public_but_chat_trace_is_absent() {
 }
 
 #[tokio::test]
+async fn opaque_reasoning_and_output_items_replay_as_typed_input() {
+    let fixture = fixture(100_000);
+    let request = json!({
+        "model": "mock-reasoner",
+        "input": "Which release should ship?",
+        "reasoning": {"effort": "high", "summary": "auto"},
+        "store": false
+    });
+    let (status, _, parent_body) =
+        send(fixture.app.clone(), "POST", "/v1/responses", Some(request)).await;
+    assert_eq!(status, 200, "{parent_body}");
+    let parent: Value = serde_json::from_str(&parent_body).unwrap();
+    let encrypted = parent["output"][0]["encrypted_content"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let replay_input = json!([
+        parent["output"][0].clone(),
+        parent["output"][1].clone(),
+        {"type": "message", "role": "user", "content": "Which release should ship?"}
+    ]);
+    let (status, _, replay_body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-reasoner",
+            "input": replay_input,
+            "reasoning": {"effort": "high", "summary": "auto"},
+            "store": false,
+            "x_simulate": {"case": "reasoning-effort/release-decision"}
+        })),
+    )
+    .await;
+    assert_eq!(status, 200, "{replay_body}");
+    let replay: Value = serde_json::from_str(&replay_body).unwrap();
+    assert_eq!(replay["output_text"], parent["output_text"]);
+    assert_ne!(replay["id"], parent["id"]);
+    assert!(!replay_body.contains(&encrypted));
+
+    let invalid_cases = [
+        ("missing", {
+            let mut input = replay["output"].clone();
+            input[0]
+                .as_object_mut()
+                .unwrap()
+                .remove("encrypted_content");
+            input
+        }),
+        ("corrupt", {
+            let mut input = replay["output"].clone();
+            input[0]["encrypted_content"] = json!("corrupt");
+            input
+        }),
+        ("wrong-context", {
+            let mut input = parent["output"].clone();
+            input[1]["id"] = json!("msg_0000000000000000");
+            input
+        }),
+        ("duplicate", {
+            let mut input = parent["output"].as_array().unwrap().clone();
+            input.insert(1, input[0].clone());
+            Value::Array(input)
+        }),
+    ];
+    for (name, input) in invalid_cases {
+        let (status, _, body) = send(
+            fixture.app.clone(),
+            "POST",
+            "/v1/responses",
+            Some(json!({
+                "model": "mock-reasoner",
+                "input": input,
+                "reasoning": {"effort": "high"},
+                "x_simulate": {"case": "reasoning-effort/release-decision"}
+            })),
+        )
+        .await;
+        assert_eq!(status, 400, "{name}: {body}");
+        assert_eq!(assert_error_envelope(&body)["error"]["param"], "input");
+    }
+}
+
+#[tokio::test]
 async fn structured_response_preserves_bytes_after_schema_validation() {
     let fixture = fixture(1_000);
     let body = json!({

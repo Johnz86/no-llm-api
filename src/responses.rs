@@ -54,12 +54,59 @@ pub enum ResponseInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(untagged)]
 pub enum ResponseInputItem {
-    Message {
-        role: ResponseRole,
-        content: ResponseInputContent,
-    },
+    Message(ResponseInputMessage),
+    Reasoning(ResponseReplayReasoning),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResponseInputMessage {
+    pub r#type: ResponseMessageType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    pub role: ResponseRole,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<ResponseItemStatus>,
+    pub content: ResponseInputContent,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponseMessageType {
+    Message,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResponseReplayReasoning {
+    pub r#type: ResponseReasoningType,
+    pub id: String,
+    #[serde(default)]
+    pub summary: Vec<ResponseSummaryPart>,
+    #[serde(default)]
+    pub content: Vec<ResponseReasoningTextPart>,
+    #[serde(default)]
+    pub encrypted_content: Option<String>,
+    #[serde(default)]
+    pub status: Option<ResponseItemStatus>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponseReasoningType {
+    Reasoning,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResponseReasoningTextPart {
+    pub r#type: ResponseReasoningTextType,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponseReasoningTextType {
+    ReasoningText,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +114,7 @@ pub enum ResponseInputItem {
 pub enum ResponseInputContent {
     Text(String),
     Parts(Vec<ResponseInputPart>),
+    OutputParts(Vec<ResponseContentPart>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,7 +123,7 @@ pub enum ResponseInputPart {
     InputText { text: String },
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ResponseRole {
     User,
@@ -190,7 +238,7 @@ pub struct ResponseDeleted {
     pub deleted: bool,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ResponseStatus {
     Completed,
@@ -200,7 +248,7 @@ pub enum ResponseStatus {
     InProgress,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ResponseItemStatus {
     Completed,
@@ -254,7 +302,7 @@ impl ResponseOutputItem {
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ResponseContentPart {
     OutputText {
@@ -267,9 +315,9 @@ pub enum ResponseContentPart {
     },
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResponseSummaryPart {
-    pub r#type: &'static str,
+    pub r#type: String,
     pub text: String,
 }
 
@@ -350,7 +398,11 @@ pub fn render_response_with_context(
                 summary, encrypted, ..
             } => {
                 summary_text = summary.clone();
-                encrypted_content = encrypted.clone();
+                encrypted_content = Some(
+                    encrypted
+                        .clone()
+                        .unwrap_or_else(|| format!("enc_{digest:016x}")),
+                );
             }
             SemanticOutput::Text { text } | SemanticOutput::Structured { json: text, .. } => {
                 message_parts.push(ResponseContentPart::OutputText {
@@ -377,7 +429,7 @@ pub fn render_response_with_context(
             .filter(|_| summary_requested)
             .map(|text| {
                 vec![ResponseSummaryPart {
-                    r#type: "summary_text",
+                    r#type: "summary_text".to_string(),
                     text,
                 }]
             })
@@ -643,7 +695,7 @@ impl CreateResponseRequest {
             stream: self.stream,
             store: self.store,
             seed: None,
-            context: None,
+            context: self.replay_context(),
         }
     }
 
@@ -652,10 +704,12 @@ impl CreateResponseRequest {
             ResponseInput::Text(text) => vec![canonical_turn("user", text)],
             ResponseInput::Items(items) => items
                 .iter()
-                .map(|item| match item {
-                    ResponseInputItem::Message { role, content } => {
-                        canonical_content_turn(role.as_str(), content)
-                    }
+                .filter_map(|item| match item {
+                    ResponseInputItem::Message(message) => Some(canonical_content_turn(
+                        message.role.as_str(),
+                        &message.content,
+                    )),
+                    ResponseInputItem::Reasoning(_) => None,
                 })
                 .collect(),
         };
@@ -664,6 +718,22 @@ impl CreateResponseRequest {
             .map(|instructions| canonical_turn("developer", instructions))
             .chain(input)
             .collect()
+    }
+
+    fn replay_context(&self) -> Option<Value> {
+        let ResponseInput::Items(items) = &self.input else {
+            return None;
+        };
+        let replay: Vec<_> = items
+            .iter()
+            .filter(|item| match item {
+                ResponseInputItem::Message(message) => message.id.is_some(),
+                ResponseInputItem::Reasoning(_) => true,
+            })
+            .collect();
+        (!replay.is_empty()).then(|| {
+            serde_json::to_value(replay).expect("typed replay items serialize canonically")
+        })
     }
 }
 
@@ -691,6 +761,22 @@ fn canonical_content_turn(role: &str, content: &ResponseInputContent) -> Canonic
         ResponseInputContent::Parts(parts) => CanonicalContent::Parts(
             serde_json::to_value(parts).expect("Responses input parts serialize"),
         ),
+        ResponseInputContent::OutputParts(parts) => {
+            if parts.len() == 1 {
+                match &parts[0] {
+                    ResponseContentPart::OutputText { text, .. } => {
+                        CanonicalContent::Text(text.clone())
+                    }
+                    ResponseContentPart::Refusal { refusal } => {
+                        CanonicalContent::Text(refusal.clone())
+                    }
+                }
+            } else {
+                CanonicalContent::Parts(
+                    serde_json::to_value(parts).expect("Responses output parts serialize"),
+                )
+            }
+        }
     };
     CanonicalTurn {
         role: role.to_string(),
@@ -712,6 +798,13 @@ impl ResponseInputContent {
                 parts.is_empty()
                     || parts.iter().all(|part| match part {
                         ResponseInputPart::InputText { text } => text.is_empty(),
+                    })
+            }
+            Self::OutputParts(parts) => {
+                parts.is_empty()
+                    || parts.iter().all(|part| match part {
+                        ResponseContentPart::OutputText { text, .. } => text.is_empty(),
+                        ResponseContentPart::Refusal { refusal } => refusal.is_empty(),
                     })
             }
         }
@@ -742,11 +835,13 @@ fn canonical_turn(role: &str, text: &str) -> CanonicalTurn {
     }
 }
 
-pub(crate) fn canonical_input_item(item: &ResponseInputItem) -> CanonicalTurn {
+pub(crate) fn canonical_input_item(item: &ResponseInputItem) -> Option<CanonicalTurn> {
     match item {
-        ResponseInputItem::Message { role, content } => {
-            canonical_content_turn(role.as_str(), content)
-        }
+        ResponseInputItem::Message(message) => Some(canonical_content_turn(
+            message.role.as_str(),
+            &message.content,
+        )),
+        ResponseInputItem::Reasoning(_) => None,
     }
 }
 
