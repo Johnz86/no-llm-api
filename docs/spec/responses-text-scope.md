@@ -9,7 +9,8 @@ typed SSE events at `POST /v1/responses`; the executable corpus in
 The locked `openai` 6.49.0 JavaScript client exercises response objects and text, reasoning-first,
 strict structured-output, and refusal streams in `e2e/responses-client.spec.ts`. The response
 includes the SDK-required `output_text` aggregation and standard response members in addition to
-the frozen minimal corpus.
+the frozen minimal corpus. The same client verifies immutable stored-response retrieval, deletion,
+and the common not-found error path.
 
 The contract is pinned to the OpenAI OpenAPI document at commit
 `5c044be3bf3a42854e99e34616564eeb2124a317` from 2026-07-23, full-document SHA-256

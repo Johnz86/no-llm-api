@@ -163,3 +163,20 @@ test('official client reconstructs refusal events without output text', async ()
   );
   expect(terminalOutputText).toBe('');
 });
+
+test('official client retrieves and deletes an immutable stored response', async () => {
+  const created = await client.responses.create({
+    model: 'mock-reasoner',
+    input: 'Which release should ship?',
+    reasoning: { effort: 'medium', summary: 'auto' },
+    store: true,
+    metadata: { suite: 'official-client-persistence' },
+  });
+
+  const retrieved = await client.responses.retrieve(created.id);
+  expect(retrieved).toEqual(created);
+
+  const deleted = await client.responses.delete(created.id);
+  expect(deleted).toEqual({ id: created.id, object: 'response', deleted: true });
+  await expect(client.responses.retrieve(created.id)).rejects.toMatchObject({ status: 404 });
+});
