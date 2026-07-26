@@ -23,7 +23,8 @@ events. Responses output budgets consume reasoning before visible output, use to
 usage, and terminate incomplete streams through the same event state machine. Milestones T5 and T6
 remain in progress/future work. T5 currently provides immutable process-local storage, retrieval,
 deletion, and counter-free `previous_response_id` continuation with cumulative input accounting;
-conversation state, tools, and control-plane diagnostics are not implemented yet.
+the redacted control-plane state view is sorted by response id, and reset clears all process-local
+Responses state. Conversation resources and tools are not implemented yet.
 
 The first future delivery stays text-first. It establishes the shared item model, deterministic
 reasoning policy, state transitions, scenario vocabulary, and validation rules that later tool,
@@ -576,8 +577,8 @@ Exit: streamed and non-streamed semantic objects are equivalent for the full sce
 ### T5: Continuation and conversation state
 
 Status: immutable process-local response storage, retrieval, deletion, and deterministic predecessor
-continuation complete; conversation logs, diagnostics, expiry, and conversation-id semantics
-pending.
+continuation complete. Redacted diagnostics and reset semantics are complete; conversation logs,
+expiry, and conversation-id semantics remain pending.
 
 - add response store, `previous_response_id`, conversation logs, replayed items, reset/deletion,
   deterministic expiry scenarios, branching, and concurrency semantics;

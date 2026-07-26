@@ -342,6 +342,45 @@ async fn concurrent_identical_continuations_produce_one_immutable_child() {
 }
 
 #[tokio::test]
+async fn state_diagnostics_are_redacted_sorted_and_reset_clears_storage() {
+    let fixture = fixture(10_000);
+    for input in [
+        "Perform the disallowed deployment action.",
+        "Summarize the release in one paragraph.",
+    ] {
+        let (status, _, _) = send(
+            fixture.app.clone(),
+            "POST",
+            "/v1/responses",
+            Some(json!({
+                "model": "mock-gpt-4o",
+                "input": input,
+                "store": true,
+                "metadata": {"secret": "must-not-appear"}
+            })),
+        )
+        .await;
+        assert_eq!(status, 200);
+    }
+
+    let (status, _, text) = send(fixture.app.clone(), "GET", "/_mock/responses", None).await;
+    assert_eq!(status, 200);
+    assert!(!text.contains("must-not-appear"));
+    assert!(!text.contains("Perform the disallowed"));
+    let state: Value = serde_json::from_str(&text).unwrap();
+    let data = state["data"].as_array().unwrap();
+    assert_eq!(data.len(), 2);
+    assert!(data[0]["id"].as_str().unwrap() < data[1]["id"].as_str().unwrap());
+    assert!(data.iter().all(|item| item["canonical_turns"] == 2));
+
+    let (status, _, _) = send(fixture.app.clone(), "POST", "/_mock/reset", None).await;
+    assert_eq!(status, 200);
+    let (_, _, text) = send(fixture.app, "GET", "/_mock/responses", None).await;
+    let state: Value = serde_json::from_str(&text).unwrap();
+    assert!(state["data"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn output_budget_is_spent_on_reasoning_before_visible_text() {
     for (limit, expected_reasoning, expect_text) in
         [(16, 16, false), (28, 28, false), (30, 28, true)]

@@ -139,9 +139,10 @@ without a semantic selector continue to use the legacy Chat matching ladder.
 | `GET /_mock/scenario` | The live profile. |
 | `PUT /_mock/scenario` | Replace it wholesale. |
 | `PATCH /_mock/scenario` | Merge a partial profile, member by member. |
-| `POST /_mock/reset` | Restore the profile the process started with and clear the log. |
+| `POST /_mock/reset` | Restore the boot profile and clear the request log and stored Responses. |
 | `GET /_mock/models` | Catalogue including simulation profiles. |
 | `GET /_mock/requests` | The last 100 requests, with credentials redacted. |
+| `GET /_mock/responses` | Sorted stored-response identities, linkage, status, and item/turn counts. |
 
 ## Health, metrics, and logs
 

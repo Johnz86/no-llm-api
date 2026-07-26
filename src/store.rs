@@ -2,6 +2,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use indexmap::IndexMap;
+use serde::Serialize;
 use serde_json::{Map, Value};
 use tokio::sync::RwLock;
 
@@ -29,6 +30,16 @@ pub struct ResponseStore {
 pub struct StoredResponse {
     pub response: ResponseObject,
     pub turns: Vec<CanonicalTurn>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ResponseStateView {
+    pub id: String,
+    pub model: String,
+    pub status: crate::responses::ResponseStatus,
+    pub previous_response_id: Option<String>,
+    pub output_items: usize,
+    pub canonical_turns: usize,
 }
 
 impl ResponseStore {
@@ -65,6 +76,27 @@ impl ResponseStore {
                 object: "response",
                 deleted: true,
             })
+    }
+
+    pub async fn snapshot(&self) -> Vec<ResponseStateView> {
+        let guard = self.inner.read().await;
+        let mut values: Vec<_> = guard
+            .values()
+            .map(|stored| ResponseStateView {
+                id: stored.response.id.clone(),
+                model: stored.response.model.clone(),
+                status: stored.response.status,
+                previous_response_id: stored.response.previous_response_id.clone(),
+                output_items: stored.response.output.len(),
+                canonical_turns: stored.turns.len(),
+            })
+            .collect();
+        values.sort_by(|left, right| left.id.cmp(&right.id));
+        values
+    }
+
+    pub async fn clear(&self) {
+        self.inner.write().await.clear();
     }
 }
 

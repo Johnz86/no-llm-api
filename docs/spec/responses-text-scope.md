@@ -108,6 +108,9 @@ and the parsed value separately so byte reconstruction and semantic validation r
   pre-response fault checks. `GET /v1/responses/{response_id}` retrieves the exact object and
   `DELETE` returns `{id, object: "response", deleted: true}`; stateless responses are not
   retrievable.
+- `GET /_mock/responses` exposes only sorted response identity, model, status, linkage, and aggregate
+  item/turn counts. It never returns input, output text, reasoning, metadata, or credentials.
+  `POST /_mock/reset` clears this process-local state together with the request log.
 - `previous_response_id` requires an available immutable stored predecessor. The predecessor's
   canonical turns are prepended for semantic matching and its complete public object participates
   in child plan identity, so branches require no counters or request ordering. Missing and deleted
