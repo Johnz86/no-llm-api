@@ -189,6 +189,10 @@ impl Transcript {
 
 /// Drives an in-process router and collects the SSE transcript for a request body.
 pub async fn collect_sse(app: axum::Router, body: serde_json::Value) -> Transcript {
+    collect_sse_at(app, "/v1/chat/completions", body).await
+}
+
+pub async fn collect_sse_at(app: axum::Router, uri: &str, body: serde_json::Value) -> Transcript {
     use axum::body::Body;
     use axum::http::Request;
     use futures::StreamExt;
@@ -199,7 +203,7 @@ pub async fn collect_sse(app: axum::Router, body: serde_json::Value) -> Transcri
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/chat/completions")
+                .uri(uri)
                 .header("content-type", "application/json")
                 .body(Body::from(body.to_string()))
                 .unwrap(),

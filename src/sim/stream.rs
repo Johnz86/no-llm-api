@@ -32,7 +32,7 @@ impl CancelCounter {
         self.0.load(Ordering::Relaxed)
     }
 
-    fn record(&self) {
+    pub(crate) fn record(&self) {
         self.0.fetch_add(1, Ordering::Relaxed);
     }
 }

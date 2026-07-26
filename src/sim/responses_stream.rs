@@ -1,12 +1,173 @@
 //! Deterministic event scheduling for streamed Responses objects.
 
+use std::convert::Infallible;
+use std::num::NonZeroU32;
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::response::sse::Event;
+use futures::Stream;
+use rand::rngs::StdRng;
+use rand::{RngExt, SeedableRng};
 use serde_json::{Value, json};
 use tiktoken_rs::CoreBPE;
 
 use crate::responses::{
     ResponseContentPart, ResponseObject, ResponseOutputItem, ResponseStatus, ResponseSummaryPart,
 };
+use crate::sim::scenario::{Fault, FaultKind, FaultStage, Timing};
+use crate::sim::stream::CancelCounter;
 use crate::sim::stream::token_pieces;
+
+pub struct ResponsesStreamPlan {
+    pub events: Vec<Value>,
+    pub gap: Duration,
+    pub ttft: Duration,
+    pub jitter_ms: u64,
+    pub burst_frames: u32,
+    pub fault: Fault,
+    pub seed: u64,
+}
+
+impl ResponsesStreamPlan {
+    pub fn with_profile(
+        response: &ResponseObject,
+        tokenizer: &CoreBPE,
+        rate: NonZeroU32,
+        timing: &Timing,
+        fault: &Fault,
+        seed: u64,
+    ) -> Self {
+        let effective_rate = timing
+            .tokens_per_second
+            .and_then(NonZeroU32::new)
+            .unwrap_or(rate);
+        Self {
+            events: response_events(response, tokenizer),
+            gap: Duration::from_secs_f64(1.0 / f64::from(effective_rate.get())),
+            ttft: Duration::from_millis(timing.ttft_ms),
+            jitter_ms: timing.jitter_ms,
+            burst_frames: timing.burst_frames,
+            fault: fault.clone(),
+            seed,
+        }
+    }
+
+    pub fn keep_alive(&self) -> bool {
+        self.fault.kind == FaultKind::Stall
+    }
+}
+
+pub fn responses_sse_stream(
+    plan: ResponsesStreamPlan,
+    cancels: Arc<CancelCounter>,
+) -> impl Stream<Item = Result<Event, Infallible>> {
+    async_stream::stream! {
+        let mut guard = ResponsesCancelGuard { cancels, done: false };
+        let mut rng = StdRng::seed_from_u64(plan.seed);
+        let fires = plan.fault.kind != FaultKind::None
+            && (plan.fault.rate >= 1.0 || rng.random::<f64>() < plan.fault.rate);
+        let trigger_at = responses_fault_trigger_index(&plan.fault, &plan.events);
+
+        if !plan.ttft.is_zero() {
+            tokio::time::sleep(plan.ttft).await;
+        }
+
+        for (index, event) in plan.events.iter().enumerate() {
+            if fires && index == trigger_at {
+                match plan.fault.kind {
+                    FaultKind::Drop => {
+                        guard.done = true;
+                        return;
+                    }
+                    FaultKind::SseError => {
+                        yield Ok(responses_error_event(index));
+                        guard.done = true;
+                        return;
+                    }
+                    FaultKind::Stall => {
+                        tokio::time::sleep(Duration::from_millis(
+                            plan.fault.after_ms.unwrap_or(30_000),
+                        )).await;
+                    }
+                    _ => {}
+                }
+            }
+
+            if index > 0 && (index as u32) >= plan.burst_frames {
+                let mut gap = plan.gap;
+                if fires && plan.fault.kind == FaultKind::SlowThenRecover && index < trigger_at {
+                    gap *= 5;
+                }
+                if plan.jitter_ms > 0 {
+                    gap += Duration::from_millis(rng.random_range(0..=plan.jitter_ms));
+                }
+                if !gap.is_zero() {
+                    tokio::time::sleep(gap).await;
+                }
+            }
+
+            yield Ok(encode_response_event(event));
+        }
+        guard.done = true;
+    }
+}
+
+struct ResponsesCancelGuard {
+    cancels: Arc<CancelCounter>,
+    done: bool,
+}
+
+impl Drop for ResponsesCancelGuard {
+    fn drop(&mut self) {
+        if !self.done {
+            self.cancels.record();
+        }
+    }
+}
+
+fn encode_response_event(value: &Value) -> Event {
+    let event_type = value["type"]
+        .as_str()
+        .expect("scheduled Responses events have a type");
+    Event::default()
+        .event(event_type)
+        .data(serde_json::to_string(value).expect("Responses events serialize"))
+}
+
+fn responses_error_event(sequence_number: usize) -> Event {
+    encode_response_event(&json!({
+        "type": "error",
+        "code": "server_error",
+        "message": "The server had an error while processing your request.",
+        "param": null,
+        "sequence_number": sequence_number,
+    }))
+}
+
+fn responses_fault_trigger_index(fault: &Fault, events: &[Value]) -> usize {
+    let Some(stage) = fault.stage else {
+        return fault.after_frames.unwrap_or(2) as usize;
+    };
+    let offset = fault.after_frames.unwrap_or(0) as usize;
+    events
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| response_event_stage(event) == Some(stage))
+        .nth(offset)
+        .map_or(usize::MAX, |(index, _)| index)
+}
+
+fn response_event_stage(event: &Value) -> Option<FaultStage> {
+    match event["type"].as_str() {
+        Some("response.reasoning_summary_text.delta") => Some(FaultStage::Reasoning),
+        Some("response.output_text.delta" | "response.refusal.delta") => Some(FaultStage::Output),
+        Some(
+            "response.completed" | "response.incomplete" | "response.failed" | "response.cancelled",
+        ) => Some(FaultStage::Terminal),
+        _ => None,
+    }
+}
 
 /// Produces the complete ordered event schedule for a Responses stream.
 ///

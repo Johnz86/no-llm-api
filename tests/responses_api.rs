@@ -3,6 +3,7 @@
 mod support;
 
 use serde_json::{Value, json};
+use support::sse::collect_sse_at;
 use support::{assert_error_envelope, fixture, send, send_with_headers};
 
 #[tokio::test]
@@ -129,7 +130,6 @@ async fn schema_mismatch_uses_the_common_error_envelope() {
 #[tokio::test]
 async fn unsupported_future_controls_fail_explicitly() {
     for (field, value) in [
-        ("stream", json!(true)),
         ("store", json!(true)),
         ("previous_response_id", json!("resp_parent")),
         ("tools", json!([{"type": "function"}])),
@@ -147,6 +147,49 @@ async fn unsupported_future_controls_fail_explicitly() {
         assert_eq!(response["error"]["param"], field);
         assert_eq!(response["error"]["code"], "unsupported_parameter");
     }
+}
+
+#[tokio::test]
+async fn stream_reconstructs_reasoning_then_text_without_a_done_sentinel() {
+    let fixture = fixture(10_000);
+    let transcript = collect_sse_at(
+        fixture.app,
+        "/v1/responses",
+        json!({
+            "model": "mock-reasoner",
+            "input": "Which release should ship?",
+            "reasoning": {"effort": "high", "summary": "auto"},
+            "stream": true
+        }),
+    )
+    .await;
+    let events = transcript.chunks();
+
+    assert!(transcript.frames.iter().all(|frame| !frame.is_done()));
+    for (sequence, event) in events.iter().enumerate() {
+        assert_eq!(event["sequence_number"], sequence);
+    }
+    assert_eq!(events[0]["type"], "response.created");
+    assert_eq!(events.last().unwrap()["type"], "response.completed");
+    let summary_end = events
+        .iter()
+        .rposition(|event| event["type"] == "response.reasoning_summary_text.delta")
+        .unwrap();
+    let output_start = events
+        .iter()
+        .position(|event| event["type"] == "response.output_text.delta")
+        .unwrap();
+    assert!(summary_end < output_start);
+    let text: String = events
+        .iter()
+        .filter(|event| event["type"] == "response.output_text.delta")
+        .map(|event| event["delta"].as_str().unwrap())
+        .collect();
+    assert_eq!(text, "Ship release B.");
+    assert_eq!(
+        events.last().unwrap()["response"]["output_text"],
+        "Ship release B."
+    );
 }
 
 #[tokio::test]

@@ -2,10 +2,9 @@
 
 ## Status
 
-This document freezes the Responses text contract. The repository serves the non-streamed subset at
-`POST /v1/responses`; the executable corpus in
-[`responses-text-contract/`](responses-text-contract/) defines both that object boundary and the
-streaming target implemented in the next milestone.
+This document freezes the Responses text contract. The repository serves non-streamed objects and
+typed SSE events at `POST /v1/responses`; the executable corpus in
+[`responses-text-contract/`](responses-text-contract/) defines both boundaries.
 
 The locked `openai` 6.49.0 JavaScript client exercises non-streamed reasoning summaries and strict
 structured output in `e2e/responses-client.spec.ts`. The response includes the SDK-required
@@ -136,5 +135,5 @@ non-streamed response, and complete ordered event payloads for its streamed equi
 
 `tests/responses_contract.rs` proves contiguous sequence numbers, legal state ordering, one terminal
 event, delta reconstruction, equality between terminal and non-streamed responses, reasoning
-visibility, structured semantic equality, and provenance/SDK pinning. Those tests are contract
-tests for the next production slice, not evidence that `/v1/responses` is already served.
+visibility, structured semantic equality, and provenance/SDK pinning. `tests/responses_api.rs`
+exercises the production event schedule through the in-process HTTP server.

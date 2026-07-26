@@ -27,7 +27,7 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 
 Add `"stream":true` and use `curl -N` to observe the paced SSE transcript.
 
-The experimental non-streamed Responses surface uses the same semantic fixtures:
+The experimental Responses surface uses the same semantic fixtures:
 
 ```bash
 curl http://127.0.0.1:8080/v1/responses \
@@ -35,9 +35,9 @@ curl http://127.0.0.1:8080/v1/responses \
   -d '{"model":"mock-reasoner","input":"Which release should ship?","reasoning":{"effort":"high","summary":"auto"}}'
 ```
 
-It supports text, public reasoning summaries, refusals, and validated structured output. Responses
-streaming, persistence, continuation, output limits, and tools return explicit unsupported-parameter
-errors until their dedicated implementation slices land.
+It supports text, public reasoning summaries, refusals, validated structured output, and typed SSE
+events with `"stream":true`. Persistence, continuation, output limits, and tools return explicit
+unsupported-parameter errors until their dedicated implementation slices land.
 
 ## Request behaviour
 
@@ -51,8 +51,9 @@ Every request follows the same deterministic pipeline:
    metadata, and finish reasons. The configured tokenizer calculates usage and stream pieces.
    Request limits such as `n` and `max_completion_tokens` shape the returned choices without
    introducing nondeterminism.
-4. A non-streamed request receives one JSON completion. A streamed request receives OpenAI-shaped
-   SSE deltas, one terminal choice frame per choice, an optional final usage frame, and `[DONE]`.
+4. A non-streamed request receives one JSON completion. Streamed Chat requests receive deltas, one
+   terminal choice frame per choice, an optional final usage frame, and `[DONE]`. Streamed Responses
+   requests receive named lifecycle events ending with a terminal response event and no sentinel.
 5. Scenario and per-request directives control timing and faults. They never change which fixture is
    selected.
 
@@ -335,9 +336,9 @@ pagination for the lifetime of the process.
   (`tests/http_api.rs`), the SSE transcript contract (`tests/sse.rs`) and the async-openai client
   contract (`tests/async_openai.rs`). No environment variables and no upstream network access are
   required.
-- `tests/support/sse.rs` is the shared transcript parser and assertion harness: exactly one trailing
-  `[DONE]`, one `finish_reason` on the last chunk carrying a choice, stable chunk ids, usage-frame
-  position, and median inter-frame pacing.
+- `tests/support/sse.rs` is the shared transcript parser and assertion harness. Chat assertions cover
+  `[DONE]`, finish reasons, stable chunk ids, usage-frame position, and pacing; Responses assertions
+  cover contiguous event sequences, reconstruction, terminal equality, and the absent sentinel.
 - `npm --prefix e2e test` starts the server, drives the embedded page in Chromium, and exercises
   non-streamed Responses with the locked official JavaScript client. It verifies incremental
   rendering, exact fixture text, browser-console hygiene, API errors, reasoning summaries, and

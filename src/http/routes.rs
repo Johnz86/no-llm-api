@@ -30,6 +30,7 @@ use crate::sim::artifact::{SemanticArtifact, builtin_artifact};
 use crate::sim::canonical::CanonicalRequest;
 use crate::sim::directive::Directive;
 use crate::sim::plan::{PlanError, SemanticCapabilities, SemanticOutput, SemanticResponsePlan};
+use crate::sim::responses_stream::{ResponsesStreamPlan, responses_sse_stream};
 use crate::sim::scenario::{FaultKind, Scenario, Timing};
 use crate::sim::stream::{CancelCounter, StreamPlan, sse_stream};
 use crate::store::{ListFilters, SortOrder};
@@ -518,13 +519,22 @@ async fn create_response(
     validate_response_schema(&request, &plan)?;
     let response = render_response(&request, &plan, state.service.tokenizer().as_ref());
     let scenario = state.scenario.load_full();
-    let (_, fault) = directive.apply(&scenario);
+    let base = model_timing(&state, &request.model).unwrap_or_else(|| scenario.timing.clone());
+    let effective_scenario = Scenario {
+        timing: if scenario.timing == Timing::default() {
+            base
+        } else {
+            scenario.timing.clone()
+        },
+        ..scenario.as_ref().clone()
+    };
+    let (timing, fault) = directive.apply(&effective_scenario);
     let plan_seed = state.seed ^ plan_seed_of(&response.id);
     if fault.kind == FaultKind::HttpError && fault_fires(&fault, plan_seed) {
         state.metrics.record_fault();
         return Err(http_fault_error(&fault));
     }
-    state.metrics.record_completion(false);
+    state.metrics.record_completion(request.stream);
 
     let diagnostics = SemanticDiagnostics {
         dataset_revision: plan.explanation.effective_controls.dataset_revision.clone(),
@@ -532,7 +542,34 @@ async fn create_response(
         variant_id: plan.variant_id,
         plan_digest: plan.plan_digest,
     };
-    let mut wire = Json(response).into_response();
+    let stream = request.stream;
+    let mut wire = if stream {
+        let plan = ResponsesStreamPlan::with_profile(
+            &response,
+            state.service.tokenizer().as_ref(),
+            state.service.tokens_per_second(),
+            &timing,
+            &fault,
+            plan_seed,
+        );
+        let keep_alive = plan.keep_alive();
+        let sse = Sse::new(responses_sse_stream(plan, state.cancels.clone()));
+        let mut wire = if keep_alive {
+            sse.keep_alive(
+                axum::response::sse::KeepAlive::new()
+                    .interval(Duration::from_secs(5))
+                    .text("ping"),
+            )
+            .into_response()
+        } else {
+            sse.into_response()
+        };
+        wire.headers_mut()
+            .insert(&ACCEL_BUFFERING, HeaderValue::from_static("no"));
+        wire
+    } else {
+        Json(response).into_response()
+    };
     wire.headers_mut().insert(
         &SIMULATE_MATCH,
         HeaderValue::from_static(match plan.explanation.match_kind {
@@ -553,13 +590,6 @@ fn validate_response_request(request: &CreateResponseRequest) -> Result<(), ApiE
             "Invalid value for 'input': expected non-empty input.",
         )
         .with_param("input"));
-    }
-    if request.stream {
-        return Err(ApiError::invalid_request(
-            "Responses streaming is not implemented in this release.",
-        )
-        .with_param("stream")
-        .with_code("unsupported_parameter"));
     }
     if request.store {
         return Err(ApiError::invalid_request(

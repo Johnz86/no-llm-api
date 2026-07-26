@@ -3,8 +3,8 @@
 ## Status and intent
 
 This document tracks the staged text and reasoning implementation beyond version 1.0.0. The server
-provides deterministic offline Chat Completions and non-streamed Responses while the remaining work
-extends the Responses transport and state model.
+provides deterministic offline Chat Completions and Responses objects/events while the remaining
+work extends the Responses state model.
 
 Milestones T0 through T3 are complete. The pinned scope, decisions, event/state table, and executable
 wire corpus live in `docs/spec/responses-text-scope.md` and `docs/spec/responses-text-contract/`.
@@ -14,9 +14,10 @@ fixture CLI. Explicit per-request selectors render those plans through the exist
 SSE, and storage paths with effort variants, schema validation, reasoning-first token budgets,
 diagnostic headers, and stage-aware faults. The legacy matching ladder remains isolated and
 byte-stable. The non-streamed Responses route renders text, refusals, public reasoning summaries,
-and schema-validated structured output through the locked official JavaScript client. Milestones T4
-through T6 remain future work; Responses streaming, state, tools, and control-plane diagnostics are
-not implemented yet.
+and schema-validated structured output through the locked official JavaScript client. The T4 server
+path schedules typed, contiguous, reasoning-first SSE events with deterministic pacing, faults, and
+cancellation. Its official-client streaming audit remains open. Milestones T5 and T6 remain future
+work; Responses state, tools, and control-plane diagnostics are not implemented yet.
 
 The first future delivery stays text-first. It establishes the shared item model, deterministic
 reasoning policy, state transitions, scenario vocabulary, and validation rules that later tool,
@@ -557,6 +558,8 @@ Exit: old tests are byte-stable and the new effort/schema/fault matrix passes.
 Exit: the locked official client completes all non-streamed text-first contract tests offline.
 
 ### T4: Responses streaming
+
+Status: server implementation and repository harness complete; official-client audit pending.
 
 - implement the pinned event state machine and schedule renderer;
 - add delta reconstruction, event snapshots, stage faults, pacing, and cancellation;
