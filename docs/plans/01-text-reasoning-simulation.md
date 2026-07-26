@@ -6,7 +6,7 @@ This document tracks the staged text and reasoning implementation beyond version
 provides deterministic offline Chat Completions and Responses objects/events while the remaining
 work extends the Responses state model.
 
-Milestones T0 through T3 are complete. The pinned scope, decisions, event/state table, and executable
+Milestones T0 through T4 are complete. The pinned scope, decisions, event/state table, and executable
 wire corpus live in `docs/spec/responses-text-scope.md` and `docs/spec/responses-text-contract/`.
 Schema-v2 fixtures, deterministic compilation, canonical requests, semantic plans, redacted explain
 output, golden plan snapshots, and reproducible artifacts live under `fixtures/v2`, `sim`, and the
@@ -18,9 +18,9 @@ and schema-validated structured output through the locked official JavaScript cl
 path schedules typed, contiguous, reasoning-first SSE events with deterministic pacing, faults, and
 cancellation. Authored fixtures cover refusal plus completed, incomplete, failed, and cancelled
 lifecycles, while endpoint tests cover staged errors, deliberate drops, and consumer cancellation.
-The locked official client reconstructs the public summary and answer from events. Its remaining T4
-audit covers structured output and refusal streams. Milestones T5 and T6 remain future work;
-Responses state, tools, and control-plane diagnostics are not implemented yet.
+The locked official client reconstructs text, public summaries, structured output, and refusals from
+events. Milestones T5 and T6 remain future work; Responses state, tools, and control-plane
+diagnostics are not implemented yet.
 
 The first future delivery stays text-first. It establishes the shared item model, deterministic
 reasoning policy, state transitions, scenario vocabulary, and validation rules that later tool,
@@ -562,8 +562,7 @@ Exit: the locked official client completes all non-streamed text-first contract 
 
 ### T4: Responses streaming
 
-Status: server lifecycle/fault matrix and official-client reasoning stream complete; official-client
-structured-output and refusal audit pending.
+Status: complete.
 
 - implement the pinned event state machine and schedule renderer;
 - add delta reconstruction, event snapshots, stage faults, pacing, and cancellation;

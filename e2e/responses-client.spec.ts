@@ -97,3 +97,69 @@ test('official client reconstructs a reasoning-first Responses stream', async ()
   expect(text).toBe('Ship release B.');
   expect(terminalOutputText).toBe(text);
 });
+
+test('official client preserves structured bytes across a Responses stream', async () => {
+  const stream = await client.responses.create(
+    {
+      model: 'mock-gpt-4o',
+      input: 'Report release status.',
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'release-status',
+          strict: true,
+          schema: {
+            type: 'object',
+            properties: {
+              status: { const: 'green' },
+              blockers: { type: 'integer' },
+            },
+            required: ['status', 'blockers'],
+            additionalProperties: false,
+          },
+        },
+      },
+      stream: true,
+    },
+    { headers: { 'X-Simulate-Case': 'structured-output/release-status' } },
+  );
+  let text = '';
+  let terminalOutputText: string | undefined;
+
+  for await (const event of stream) {
+    if (event.type === 'response.output_text.delta') {
+      text += event.delta;
+    }
+    if (event.type === 'response.completed') {
+      terminalOutputText = event.response.output_text;
+    }
+  }
+
+  expect(text).toBe('{"status":"green","blockers":0}');
+  expect(JSON.parse(text)).toEqual({ status: 'green', blockers: 0 });
+  expect(terminalOutputText).toBe(text);
+});
+
+test('official client reconstructs refusal events without output text', async () => {
+  const stream = await client.responses.create({
+    model: 'mock-gpt-4o',
+    input: 'Perform the disallowed deployment action.',
+    stream: true,
+  });
+  let refusal = '';
+  let terminalOutputText: string | undefined;
+
+  for await (const event of stream) {
+    if (event.type === 'response.refusal.delta') {
+      refusal += event.delta;
+    }
+    if (event.type === 'response.completed') {
+      terminalOutputText = event.response.output_text;
+    }
+  }
+
+  expect(refusal).toBe(
+    'I cannot perform that action, but I can help review a safe deployment plan.',
+  );
+  expect(terminalOutputText).toBe('');
+});
