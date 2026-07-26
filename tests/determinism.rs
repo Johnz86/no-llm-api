@@ -5,7 +5,7 @@ mod support;
 use std::collections::BTreeSet;
 
 use serde_json::json;
-use support::sse::collect_sse;
+use support::sse::{collect_sse, collect_sse_at};
 use support::{PLAIN_PROMPT, TOOL_PROMPT, UNICODE_PROMPT, body, fixture, send, stream_body};
 
 #[tokio::test]
@@ -57,6 +57,46 @@ async fn sixty_four_concurrent_identical_requests_agree() {
         "concurrency produced {} distinct bodies",
         distinct.len()
     );
+}
+
+#[tokio::test]
+async fn sixty_four_responses_requests_agree_in_sync_and_stream_modes() {
+    let fixture = fixture(100_000);
+    let body = json!({
+        "model": "mock-reasoner",
+        "input": "Which release should ship?",
+        "reasoning": {"effort": "high", "summary": "auto"},
+        "store": false
+    });
+    let sync = futures::future::join_all((0..64).map(|_| {
+        send(
+            fixture.app.clone(),
+            "POST",
+            "/v1/responses",
+            Some(body.clone()),
+        )
+    }))
+    .await;
+    let sync_bodies: BTreeSet<_> = sync
+        .into_iter()
+        .map(|(status, _, body)| {
+            assert_eq!(status, 200);
+            body
+        })
+        .collect();
+    assert_eq!(sync_bodies.len(), 1);
+
+    let mut stream_body = body;
+    stream_body["stream"] = json!(true);
+    let streams = futures::future::join_all(
+        (0..64).map(|_| collect_sse_at(fixture.app.clone(), "/v1/responses", stream_body.clone())),
+    )
+    .await;
+    let transcripts: BTreeSet<_> = streams
+        .into_iter()
+        .map(|transcript| serde_json::to_string(&transcript.chunks()).unwrap())
+        .collect();
+    assert_eq!(transcripts.len(), 1);
 }
 
 #[tokio::test]

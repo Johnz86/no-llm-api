@@ -8,8 +8,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-/// The seven built-in profiles, embedded at compile time.
-pub const BUILTINS: [(&str, &str); 7] = [
+/// The eight built-in profiles, embedded at compile time.
+pub const BUILTINS: [(&str, &str); 8] = [
     ("default", include_str!("../../scenarios/default.yaml")),
     ("fast", include_str!("../../scenarios/fast.yaml")),
     ("slow", include_str!("../../scenarios/slow.yaml")),
@@ -20,6 +20,10 @@ pub const BUILTINS: [(&str, &str); 7] = [
         include_str!("../../scenarios/rate-limited.yaml"),
     ),
     ("outage", include_str!("../../scenarios/outage.yaml")),
+    (
+        "state-expired",
+        include_str!("../../scenarios/state-expired.yaml"),
+    ),
 ];
 
 /// A complete behaviour profile.
@@ -33,6 +37,8 @@ pub struct Scenario {
     pub timing: Timing,
     #[serde(default)]
     pub fault: Fault,
+    #[serde(default)]
+    pub state: StateBehavior,
 }
 
 impl Default for Scenario {
@@ -42,8 +48,15 @@ impl Default for Scenario {
             description: "Deterministic pacing, no faults.".to_string(),
             timing: Timing::default(),
             fault: Fault::default(),
+            state: StateBehavior::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct StateBehavior {
+    pub expire_previous_response: bool,
 }
 
 /// Pacing knobs. `None` means "inherit the server-wide setting".
@@ -67,6 +80,8 @@ pub struct Timing {
 #[serde(deny_unknown_fields, default)]
 pub struct Fault {
     pub kind: FaultKind,
+    /// Optional semantic boundary; absent preserves global frame indexing.
+    pub stage: Option<FaultStage>,
     /// Probability in `0.0..=1.0`, evaluated against the seeded generator.
     pub rate: f64,
     /// Status for `http_error`.
@@ -77,6 +92,36 @@ pub struct Fault {
     pub after_ms: Option<u64>,
     /// Frames to emit before `drop`, `sse_error` or `slow_then_recover` acts.
     pub after_frames: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FaultStage {
+    Reasoning,
+    Output,
+    Tool,
+    Terminal,
+}
+
+impl FaultStage {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Reasoning => "reasoning",
+            Self::Output => "output",
+            Self::Tool => "tool",
+            Self::Terminal => "terminal",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "reasoning" => Some(Self::Reasoning),
+            "output" => Some(Self::Output),
+            "tool" => Some(Self::Tool),
+            "terminal" => Some(Self::Terminal),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -242,5 +287,18 @@ mod tests {
             assert_eq!(FaultKind::parse(kind.as_str()), Some(kind));
         }
         assert_eq!(FaultKind::parse("nonsense"), None);
+    }
+
+    #[test]
+    fn fault_stages_round_trip_through_extension_safe_labels() {
+        for stage in [
+            FaultStage::Reasoning,
+            FaultStage::Output,
+            FaultStage::Tool,
+            FaultStage::Terminal,
+        ] {
+            assert_eq!(FaultStage::parse(stage.as_str()), Some(stage));
+        }
+        assert_eq!(FaultStage::parse("nonsense"), None);
     }
 }

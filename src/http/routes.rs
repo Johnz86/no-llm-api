@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,17 +17,31 @@ use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer, Expos
 use uuid::Uuid;
 
 use crate::config::{AuthSettings, ControlPlaneSettings, CorsSettings};
+use crate::conversations::{
+    ConversationStore, CreateConversationItemsRequest, CreateConversationRequest,
+};
 use crate::http::auth;
 use crate::http::control::{self, RequestLog};
 use crate::http::error::{ApiError, not_found_fallback};
 use crate::http::metrics::Metrics;
 use crate::model::{ChatCompletionList, ChatCompletionMessageList, ChatCompletionRequest};
 use crate::models::ModelCatalogue;
+use crate::request_types::ResponseFormat;
+use crate::responses::{
+    CreateResponseRequest, ResponseContentPart, ResponseInput, ResponseInputItem,
+    ResponseItemStatus, ResponseOutputItem, ResponseRole, ResponseTextFormat,
+    canonical_input_tokens, render_response_with_context,
+};
 use crate::service::ChatService;
+use crate::service::SemanticDiagnostics;
+use crate::sim::artifact::{SemanticArtifact, builtin_artifact};
+use crate::sim::canonical::CanonicalRequest;
 use crate::sim::directive::Directive;
+use crate::sim::plan::{PlanError, SemanticCapabilities, SemanticOutput, SemanticResponsePlan};
+use crate::sim::responses_stream::{ResponsesStreamPlan, responses_sse_stream};
 use crate::sim::scenario::{FaultKind, Scenario, Timing};
 use crate::sim::stream::{CancelCounter, StreamPlan, sse_stream};
-use crate::store::{ListFilters, SortOrder};
+use crate::store::{ListFilters, ResponseStore, SortOrder};
 
 /// The page served at `/`, embedded so the binary works from any directory.
 const INDEX_HTML: &str = include_str!("../../index.html");
@@ -35,6 +50,10 @@ const REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
 const ACCEL_BUFFERING: HeaderName = HeaderName::from_static("x-accel-buffering");
 /// Which rung of the matching ladder produced the reply; for test triage only.
 const SIMULATE_MATCH: HeaderName = HeaderName::from_static("x-simulate-match");
+const SIMULATE_DATASET: HeaderName = HeaderName::from_static("x-simulate-dataset-revision");
+const SIMULATE_CASE: HeaderName = HeaderName::from_static("x-simulate-case");
+const SIMULATE_VARIANT: HeaderName = HeaderName::from_static("x-simulate-variant");
+const SIMULATE_PLAN: HeaderName = HeaderName::from_static("x-simulate-plan-digest");
 /// Which build answered, so a CI job can assert it talked to the container it meant to.
 const VERSION_HEADER: HeaderName = HeaderName::from_static("x-no-llm-api-version");
 
@@ -43,6 +62,9 @@ pub struct AppState {
     pub service: Arc<ChatService>,
     pub cancels: Arc<CancelCounter>,
     pub models: ModelCatalogue,
+    pub semantic: Arc<SemanticArtifact>,
+    pub responses: ResponseStore,
+    pub conversations: ConversationStore,
     /// The live behaviour profile, swappable through the control plane.
     pub scenario: Arc<ArcSwap<Scenario>>,
     /// The profile the process started with, restored by `POST /_mock/reset`.
@@ -101,6 +123,9 @@ pub fn build_router_with_options(
         service,
         cancels: Arc::new(CancelCounter::default()),
         models: options.models,
+        semantic: builtin_artifact(),
+        responses: ResponseStore::new(),
+        conversations: ConversationStore::default(),
         scenario: Arc::new(ArcSwap::new(boot_scenario.clone())),
         boot_scenario,
         seed: options.seed,
@@ -123,6 +148,24 @@ pub fn build_router_with_options(
         .route(
             "/chat/completions/{completion_id}/messages",
             get(get_chat_completion_messages),
+        )
+        .route("/responses", post(create_response))
+        .route(
+            "/responses/{response_id}",
+            get(get_response).delete(delete_response),
+        )
+        .route("/conversations", post(create_conversation))
+        .route(
+            "/conversations/{conversation_id}",
+            get(get_conversation).delete(delete_conversation),
+        )
+        .route(
+            "/conversations/{conversation_id}/items",
+            get(list_conversation_items).post(create_conversation_items),
+        )
+        .route(
+            "/conversations/{conversation_id}/items/{item_id}",
+            get(get_conversation_item).delete(delete_conversation_item),
         )
         .route("/models", get(list_models))
         .route("/models/{model_id}", get(get_model))
@@ -230,6 +273,11 @@ fn cors_layer(settings: &CorsSettings) -> CorsLayer {
             HeaderName::from_static("x-ratelimit-limit-requests"),
             HeaderName::from_static("x-ratelimit-remaining-requests"),
             HeaderName::from_static("x-ratelimit-reset-requests"),
+            SIMULATE_MATCH,
+            SIMULATE_DATASET,
+            SIMULATE_CASE,
+            SIMULATE_VARIANT,
+            SIMULATE_PLAN,
         ]))
         .max_age(Duration::from_secs(600))
 }
@@ -393,8 +441,31 @@ async fn create_chat_completion(
     let (timing, fault) = directive.apply(&effective_scenario);
 
     let stream = request.stream;
-    let prepared = state.service.create_completion(request).await?;
-    let match_kind = HeaderValue::from_static(prepared.match_kind.as_str());
+    let prepared = if directive.case.is_some() || directive.variant.is_some() {
+        let profile = state
+            .models
+            .profile(&request.model)
+            .ok_or_else(|| ApiError::model_not_found(&request.model))?;
+        let controls = state
+            .semantic
+            .selection_controls(directive.case.clone(), directive.variant.clone());
+        let plan = crate::sim::plan::compile(
+            &state.semantic.fixtures,
+            &CanonicalRequest::from_chat(&request),
+            &controls,
+            &SemanticCapabilities::from(profile),
+        )
+        .map_err(semantic_plan_error)?;
+        validate_semantic_schema(&request, &plan)?;
+        state
+            .service
+            .create_semantic_completion(request, &plan)
+            .await?
+    } else {
+        state.service.create_completion(request).await?
+    };
+    let match_kind = HeaderValue::from_str(&prepared.match_kind)
+        .expect("simulation match kinds are valid header values");
     let plan_seed = state.seed ^ plan_seed_of(&prepared.response.id);
 
     // An http_error fault answers before any streaming starts, the way a real
@@ -408,9 +479,11 @@ async fn create_chat_completion(
     if !stream {
         let mut response = Json(prepared.response.lean()).into_response();
         response.headers_mut().insert(&SIMULATE_MATCH, match_kind);
+        insert_semantic_headers(response.headers_mut(), prepared.semantic.as_ref());
         return Ok(response);
     }
 
+    let semantic = prepared.semantic.clone();
     let plan = StreamPlan::with_profile(
         prepared,
         state.service.tokenizer().as_ref(),
@@ -435,7 +508,673 @@ async fn create_chat_completion(
     let response_headers = response.headers_mut();
     response_headers.insert(&ACCEL_BUFFERING, HeaderValue::from_static("no"));
     response_headers.insert(&SIMULATE_MATCH, match_kind);
+    insert_semantic_headers(response_headers, semantic.as_ref());
     Ok(response)
+}
+
+async fn create_response(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    body: Result<Json<CreateResponseRequest>, axum::extract::rejection::JsonRejection>,
+) -> Result<Response, ApiError> {
+    let Json(request) = body?;
+    validate_response_request(&request)?;
+    let directive = Directive::from_headers(
+        headers
+            .iter()
+            .filter_map(|(name, value)| value.to_str().ok().map(|value| (name.as_str(), value))),
+    )
+    .merge(
+        request
+            .x_simulate
+            .as_ref()
+            .map(Directive::from_value)
+            .unwrap_or_default(),
+    );
+    let profile = state
+        .models
+        .profile(&request.model)
+        .ok_or_else(|| ApiError::model_not_found(&request.model))?;
+    let scenario = state.scenario.load_full();
+    let mut canonical = request.canonical_request();
+    let prior = if let Some(previous_response_id) = request.previous_response_id.as_deref() {
+        if scenario.state.expire_previous_response {
+            return Err(ApiError::not_found(previous_response_id)
+                .with_param("previous_response_id")
+                .with_code("previous_response_expired"));
+        }
+        let stored = state
+            .responses
+            .get_stored(previous_response_id)
+            .await
+            .ok_or_else(|| {
+                ApiError::not_found(previous_response_id)
+                    .with_param("previous_response_id")
+                    .with_code("previous_response_not_found")
+            })?;
+        canonical.turns.splice(0..0, stored.turns.clone());
+        merge_response_context(
+            &mut canonical.context,
+            "previous_response",
+            serde_json::to_value(&stored.response).expect("stored Responses objects serialize"),
+        );
+        Some(stored)
+    } else {
+        None
+    };
+    let conversation = if let Some(conversation) = request.conversation.as_ref() {
+        let id = conversation.id();
+        let snapshot = state.conversations.snapshot(id).await.ok_or_else(|| {
+            ApiError::not_found(id)
+                .with_param("conversation")
+                .with_code("conversation_not_found")
+        })?;
+        canonical.turns.splice(0..0, snapshot.turns.clone());
+        merge_response_context(
+            &mut canonical.context,
+            "conversation",
+            serde_json::json!({
+                "conversation": snapshot.resource,
+                "item_ids": snapshot.item_ids,
+            }),
+        );
+        Some(snapshot)
+    } else {
+        None
+    };
+    if conversation.is_some() {
+        if let Some(delay) = directive.commit_delay_ms {
+            tokio::time::sleep(Duration::from_millis(delay.min(10_000))).await;
+        } else {
+            tokio::task::yield_now().await;
+        }
+    }
+    let controls = state
+        .semantic
+        .selection_controls(directive.case.clone(), directive.variant.clone());
+    let plan = crate::sim::plan::compile(
+        &state.semantic.fixtures,
+        &canonical,
+        &controls,
+        &SemanticCapabilities::from(profile),
+    )
+    .map_err(semantic_plan_error)?;
+    validate_response_schema(&request, &plan)?;
+    let response = render_response_with_context(
+        &request,
+        &plan,
+        state.service.tokenizer().as_ref(),
+        prior
+            .as_ref()
+            .map(|stored| stored.response.usage.total_tokens)
+            .or_else(|| {
+                conversation.as_ref().map(|snapshot| {
+                    canonical_input_tokens(&snapshot.turns, state.service.tokenizer().as_ref())
+                        + snapshot.reasoning_tokens
+                })
+            })
+            .unwrap_or(0),
+    );
+    let base = model_timing(&state, &request.model).unwrap_or_else(|| scenario.timing.clone());
+    let effective_scenario = Scenario {
+        timing: if scenario.timing == Timing::default() {
+            base
+        } else {
+            scenario.timing.clone()
+        },
+        ..scenario.as_ref().clone()
+    };
+    let (timing, fault) = directive.apply(&effective_scenario);
+    let plan_seed = state.seed ^ plan_seed_of(&response.id);
+    if fault.kind == FaultKind::HttpError && fault_fires(&fault, plan_seed) {
+        state.metrics.record_fault();
+        return Err(http_fault_error(&fault));
+    }
+    state.metrics.record_completion(request.stream);
+    if let Some(conversation) = conversation {
+        let appended = state
+            .conversations
+            .append_response(
+                &conversation.resource.id,
+                conversation.next_generation,
+                &request,
+                &response,
+                response_turn(&response),
+            )
+            .await;
+        if !appended {
+            return Err(conversation_conflict(&conversation.resource.id));
+        }
+    }
+    if request.store {
+        let mut turns = canonical.turns.clone();
+        turns.push(response_turn(&response));
+        state.responses.save(response.clone(), turns).await;
+    }
+
+    let diagnostics = SemanticDiagnostics {
+        dataset_revision: plan.explanation.effective_controls.dataset_revision.clone(),
+        case_id: plan.case_id,
+        variant_id: plan.variant_id,
+        plan_digest: plan.plan_digest,
+    };
+    let stream = request.stream;
+    let mut wire = if stream {
+        let plan = ResponsesStreamPlan::with_profile(
+            &response,
+            state.service.tokenizer().as_ref(),
+            state.service.tokens_per_second(),
+            &timing,
+            &fault,
+            plan_seed,
+        );
+        let keep_alive = plan.keep_alive();
+        let sse = Sse::new(responses_sse_stream(plan, state.cancels.clone()));
+        let mut wire = if keep_alive {
+            sse.keep_alive(
+                axum::response::sse::KeepAlive::new()
+                    .interval(Duration::from_secs(5))
+                    .text("ping"),
+            )
+            .into_response()
+        } else {
+            sse.into_response()
+        };
+        wire.headers_mut()
+            .insert(&ACCEL_BUFFERING, HeaderValue::from_static("no"));
+        wire
+    } else {
+        Json(response).into_response()
+    };
+    wire.headers_mut().insert(
+        &SIMULATE_MATCH,
+        HeaderValue::from_static(match plan.explanation.match_kind {
+            crate::sim::plan::SemanticMatchKind::Explicit => "explicit",
+            crate::sim::plan::SemanticMatchKind::Exact => "exact",
+            crate::sim::plan::SemanticMatchKind::DigestFallback => "digest_fallback",
+        }),
+    );
+    insert_semantic_headers(wire.headers_mut(), Some(&diagnostics));
+    Ok(wire)
+}
+
+async fn create_conversation(
+    State(state): State<AppState>,
+    body: Result<Json<CreateConversationRequest>, axum::extract::rejection::JsonRejection>,
+) -> Result<Response, ApiError> {
+    let Json(request) = body?;
+    if request.items.len() > 20 {
+        return Err(ApiError::invalid_request(
+            "Invalid value for 'items': at most 20 initial items are allowed.",
+        )
+        .with_param("items")
+        .with_code("invalid_value"));
+    }
+    Ok(Json(state.conversations.create(&request).await).into_response())
+}
+
+async fn create_conversation_items(
+    State(state): State<AppState>,
+    Path(conversation_id): Path<String>,
+    body: Result<Json<CreateConversationItemsRequest>, axum::extract::rejection::JsonRejection>,
+) -> Result<Response, ApiError> {
+    let Json(request) = body?;
+    if request.items.is_empty() || request.items.len() > 20 {
+        return Err(ApiError::invalid_request(
+            "Invalid value for 'items': expected between 1 and 20 items.",
+        )
+        .with_param("items")
+        .with_code("invalid_value"));
+    }
+    state
+        .conversations
+        .add_items(&conversation_id, &request)
+        .await
+        .map(|items| Json(items).into_response())
+        .ok_or_else(|| ApiError::not_found(&conversation_id))
+}
+
+async fn list_conversation_items(
+    State(state): State<AppState>,
+    Path(conversation_id): Path<String>,
+    query: Result<Query<ListQuery>, axum::extract::rejection::QueryRejection>,
+) -> Result<Response, ApiError> {
+    let Query(query) = query?;
+    let limit = query.limit.unwrap_or(20).clamp(1, 100);
+    let order = parse_order(query.order.as_deref().or(Some("desc")))?;
+    state
+        .conversations
+        .list_items(&conversation_id, order, query.after.as_deref(), limit)
+        .await
+        .map(|items| Json(items).into_response())
+        .ok_or_else(|| ApiError::not_found(&conversation_id))
+}
+
+async fn get_conversation_item(
+    State(state): State<AppState>,
+    Path((conversation_id, item_id)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    state
+        .conversations
+        .get_item(&conversation_id, &item_id)
+        .await
+        .map(|item| Json(item).into_response())
+        .ok_or_else(|| ApiError::not_found(&item_id))
+}
+
+async fn delete_conversation_item(
+    State(state): State<AppState>,
+    Path((conversation_id, item_id)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    state
+        .conversations
+        .delete_item(&conversation_id, &item_id)
+        .await
+        .map(|conversation| Json(conversation).into_response())
+        .ok_or_else(|| ApiError::not_found(&item_id))
+}
+
+async fn get_conversation(
+    State(state): State<AppState>,
+    Path(conversation_id): Path<String>,
+) -> Result<Response, ApiError> {
+    state
+        .conversations
+        .get(&conversation_id)
+        .await
+        .map(|conversation| Json(conversation).into_response())
+        .ok_or_else(|| ApiError::not_found(&conversation_id))
+}
+
+async fn delete_conversation(
+    State(state): State<AppState>,
+    Path(conversation_id): Path<String>,
+) -> Result<Response, ApiError> {
+    state
+        .conversations
+        .delete(&conversation_id)
+        .await
+        .map(|conversation| Json(conversation).into_response())
+        .ok_or_else(|| ApiError::not_found(&conversation_id))
+}
+
+fn response_turn(
+    response: &crate::responses::ResponseObject,
+) -> crate::sim::canonical::CanonicalTurn {
+    let refusal = response
+        .output
+        .iter()
+        .filter_map(ResponseOutputItem::message_content)
+        .find_map(|content| {
+            content.iter().find_map(|part| match part {
+                ResponseContentPart::Refusal { refusal } => Some(refusal.clone()),
+                ResponseContentPart::OutputText { .. } => None,
+            })
+        });
+    let text = if response.output_text.is_empty() {
+        refusal.clone().unwrap_or_default()
+    } else {
+        response.output_text.clone()
+    };
+    crate::sim::canonical::CanonicalTurn {
+        role: "assistant".to_string(),
+        content: crate::sim::canonical::CanonicalContent::Text(text),
+        name: None,
+        tool_call_id: None,
+        tool_calls: None,
+        function_call: None,
+        audio: None,
+        refusal,
+    }
+}
+
+fn merge_response_context(
+    context: &mut Option<serde_json::Value>,
+    key: &str,
+    value: serde_json::Value,
+) {
+    *context = Some(match context.take() {
+        None => value,
+        Some(replay) => serde_json::json!({
+            "input_replay": replay,
+            "state_kind": key,
+            "state": value,
+        }),
+    });
+}
+
+async fn get_response(
+    State(state): State<AppState>,
+    Path(response_id): Path<String>,
+) -> Result<Json<crate::responses::ResponseObject>, ApiError> {
+    state
+        .responses
+        .get(&response_id)
+        .await
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(&response_id))
+}
+
+async fn delete_response(
+    State(state): State<AppState>,
+    Path(response_id): Path<String>,
+) -> Result<Json<crate::responses::ResponseDeleted>, ApiError> {
+    state
+        .responses
+        .delete(&response_id)
+        .await
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(&response_id))
+}
+
+fn validate_response_request(request: &CreateResponseRequest) -> Result<(), ApiError> {
+    if matches!(&request.input, ResponseInput::Text(text) if text.is_empty())
+        || matches!(&request.input, ResponseInput::Items(items) if items.is_empty())
+    {
+        return Err(ApiError::invalid_request(
+            "Invalid value for 'input': expected non-empty input.",
+        )
+        .with_param("input"));
+    }
+    if let ResponseInput::Items(items) = &request.input
+        && items.iter().any(|item| match item {
+            ResponseInputItem::Message(message) => message.content.is_empty(),
+            ResponseInputItem::Reasoning(_) => false,
+        })
+    {
+        return Err(ApiError::invalid_request(
+            "Invalid value for 'input': message content must not be empty.",
+        )
+        .with_param("input"));
+    }
+    validate_replay_items(request)?;
+    if request.metadata.len() > 16 {
+        return Err(ApiError::invalid_request(
+            "Invalid value for 'metadata': at most 16 entries are allowed.",
+        )
+        .with_param("metadata")
+        .with_code("invalid_value"));
+    }
+    if let Some((key, _)) = request
+        .metadata
+        .iter()
+        .find(|(key, value)| key.chars().count() > 64 || value.chars().count() > 512)
+    {
+        return Err(ApiError::invalid_request(format!(
+            "Invalid metadata entry '{key}': keys are limited to 64 characters and values to 512 characters."
+        ))
+        .with_param("metadata")
+        .with_code("invalid_value"));
+    }
+    if !request.tools.is_empty() {
+        return Err(ApiError::invalid_request(
+            "Responses tools are not implemented in this release.",
+        )
+        .with_param("tools")
+        .with_code("unsupported_parameter"));
+    }
+    if request.previous_response_id.is_some() && request.conversation.is_some() {
+        return Err(ApiError::invalid_request(
+            "'previous_response_id' and 'conversation' cannot be used together.",
+        )
+        .with_param("conversation")
+        .with_code("invalid_value"));
+    }
+    if request.max_output_tokens.is_some_and(|limit| limit < 16) {
+        return Err(ApiError::invalid_request(
+            "Invalid value for 'max_output_tokens': must be at least 16.",
+        )
+        .with_param("max_output_tokens")
+        .with_code("invalid_value"));
+    }
+    Ok(())
+}
+
+fn validate_replay_items(request: &CreateResponseRequest) -> Result<(), ApiError> {
+    let ResponseInput::Items(items) = &request.input else {
+        return Ok(());
+    };
+    let mut ids = BTreeSet::new();
+    let mut pending_reasoning_suffix = None;
+    for item in items {
+        match item {
+            ResponseInputItem::Message(message) => {
+                if message.role == ResponseRole::Assistant {
+                    let id = message.id.as_deref().ok_or_else(|| {
+                        replay_error(
+                            "Assistant replay messages require their original 'id'.",
+                            "invalid_replay_item",
+                        )
+                    })?;
+                    let suffix = id.strip_prefix("msg_").ok_or_else(|| {
+                        replay_error(
+                            "Assistant replay message ids must use the simulator 'msg_' identity.",
+                            "invalid_replay_item",
+                        )
+                    })?;
+                    if !matches!(message.status, Some(ResponseItemStatus::Completed)) {
+                        return Err(replay_error(
+                            "Assistant replay messages must have status 'completed'.",
+                            "invalid_replay_item",
+                        ));
+                    }
+                    if !matches!(
+                        message.content,
+                        crate::responses::ResponseInputContent::OutputParts(_)
+                    ) {
+                        return Err(replay_error(
+                            "Assistant replay messages require output_text or refusal content parts.",
+                            "invalid_replay_item",
+                        ));
+                    }
+                    insert_replay_id(&mut ids, id)?;
+                    if let Some(reasoning_suffix) = pending_reasoning_suffix.take()
+                        && reasoning_suffix != suffix
+                    {
+                        return Err(replay_error(
+                            "Adjacent reasoning and assistant replay items must come from the same response.",
+                            "replay_context_mismatch",
+                        ));
+                    }
+                } else if message.id.is_some()
+                    || message.status.is_some()
+                    || matches!(
+                        message.content,
+                        crate::responses::ResponseInputContent::OutputParts(_)
+                    )
+                {
+                    return Err(replay_error(
+                        "Only assistant output messages may carry replay identity and output content.",
+                        "invalid_replay_item",
+                    ));
+                }
+            }
+            ResponseInputItem::Reasoning(reasoning) => {
+                let suffix = reasoning.id.strip_prefix("rs_").ok_or_else(|| {
+                    replay_error(
+                        "Reasoning replay ids must use the simulator 'rs_' identity.",
+                        "invalid_replay_item",
+                    )
+                })?;
+                insert_replay_id(&mut ids, &reasoning.id)?;
+                if !reasoning.content.is_empty() {
+                    return Err(replay_error(
+                        "Raw reasoning_text content is not accepted for replay; use encrypted_content.",
+                        "invalid_replay_item",
+                    ));
+                }
+                if !matches!(reasoning.status, Some(ResponseItemStatus::Completed)) {
+                    return Err(replay_error(
+                        "Reasoning replay items must have status 'completed'.",
+                        "invalid_replay_item",
+                    ));
+                }
+                let expected = format!("enc_{suffix}");
+                if reasoning.encrypted_content.as_deref() != Some(expected.as_str()) {
+                    return Err(replay_error(
+                        "Reasoning replay requires the intact opaque encrypted_content emitted with that item.",
+                        "invalid_encrypted_reasoning",
+                    ));
+                }
+                pending_reasoning_suffix = Some(suffix);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn insert_replay_id(ids: &mut BTreeSet<String>, id: &str) -> Result<(), ApiError> {
+    if ids.insert(id.to_string()) {
+        Ok(())
+    } else {
+        Err(replay_error(
+            "Replay item ids must be unique within one request.",
+            "duplicate_replay_item",
+        ))
+    }
+}
+
+fn replay_error(message: &str, code: &str) -> ApiError {
+    ApiError::invalid_request(message)
+        .with_param("input")
+        .with_code(code)
+}
+
+fn validate_response_schema(
+    request: &CreateResponseRequest,
+    plan: &SemanticResponsePlan,
+) -> Result<(), ApiError> {
+    let structured = plan.output.iter().find_map(|output| match output {
+        SemanticOutput::Structured { value, .. } => Some(value),
+        _ => None,
+    });
+    match request.text.as_ref().map(|text| &text.format) {
+        Some(ResponseTextFormat::JsonSchema { schema, .. }) => {
+            let value = structured.ok_or_else(|| {
+                response_schema_error(
+                    "The selected semantic variant does not contain structured output.",
+                )
+            })?;
+            let validator = jsonschema::validator_for(schema).map_err(|_| {
+                response_schema_error("Invalid text.format: JSON Schema cannot compile.")
+            })?;
+            if validator.validate(value).is_err() {
+                return Err(response_schema_error(
+                    "The selected semantic output does not satisfy text.format.schema.",
+                ));
+            }
+        }
+        Some(ResponseTextFormat::JsonObject) => {
+            if !structured.is_some_and(serde_json::Value::is_object) {
+                return Err(response_schema_error(
+                    "The selected semantic variant does not contain a JSON object.",
+                ));
+            }
+        }
+        Some(ResponseTextFormat::Text) | None => {}
+    }
+    Ok(())
+}
+
+fn response_schema_error(message: &str) -> ApiError {
+    ApiError::invalid_request(message)
+        .with_param("text.format")
+        .with_code("semantic_schema_error")
+}
+
+fn conversation_conflict(conversation_id: &str) -> ApiError {
+    ApiError::new(
+        StatusCode::CONFLICT,
+        format!(
+            "Conversation '{conversation_id}' changed while this response was being created; retry against the latest items."
+        ),
+        "invalid_request_error",
+    )
+    .with_param("conversation")
+    .with_code("conversation_conflict")
+}
+
+fn insert_semantic_headers(
+    headers: &mut axum::http::HeaderMap,
+    diagnostics: Option<&SemanticDiagnostics>,
+) {
+    let Some(diagnostics) = diagnostics else {
+        return;
+    };
+    for (name, value) in [
+        (&SIMULATE_DATASET, diagnostics.dataset_revision.as_str()),
+        (&SIMULATE_CASE, diagnostics.case_id.as_str()),
+        (&SIMULATE_VARIANT, diagnostics.variant_id.as_str()),
+        (&SIMULATE_PLAN, diagnostics.plan_digest.as_str()),
+    ] {
+        if let Ok(value) = HeaderValue::from_str(value) {
+            headers.insert(name, value);
+        }
+    }
+}
+
+fn semantic_plan_error(error: PlanError) -> ApiError {
+    let param = match error {
+        PlanError::UnknownCase(_) | PlanError::IncompatibleCase(_) => "x_simulate.case",
+        PlanError::UnknownVariant { .. } | PlanError::IncompatibleVariant { .. } => {
+            "x_simulate.variant"
+        }
+        PlanError::UnsupportedEffort { .. } | PlanError::MissingEffortVariant { .. } => {
+            "reasoning_effort"
+        }
+        PlanError::UnsupportedStructuredOutput(_) => "response_format",
+        PlanError::NoMatch
+        | PlanError::AmbiguousMatch(_)
+        | PlanError::InvalidStructuredOutput { .. } => "x_simulate.case",
+    };
+    ApiError::invalid_request(error.to_string())
+        .with_param(param)
+        .with_code("semantic_selection_error")
+}
+
+fn validate_semantic_schema(
+    request: &ChatCompletionRequest,
+    plan: &SemanticResponsePlan,
+) -> Result<(), ApiError> {
+    let structured = plan.output.iter().find_map(|output| match output {
+        SemanticOutput::Structured { value, .. } => Some(value),
+        _ => None,
+    });
+    match &request.response_format {
+        Some(ResponseFormat::JsonSchema { json_schema }) => {
+            let schema = json_schema.schema.as_ref().ok_or_else(|| {
+                semantic_schema_error("Invalid response_format: json_schema.schema is required.")
+            })?;
+            let value = structured.ok_or_else(|| {
+                semantic_schema_error(
+                    "The selected semantic variant does not contain structured output.",
+                )
+            })?;
+            let validator = jsonschema::validator_for(schema).map_err(|_| {
+                semantic_schema_error("Invalid response_format: json_schema.schema cannot compile.")
+            })?;
+            if validator.validate(value).is_err() {
+                return Err(semantic_schema_error(
+                    "The selected semantic output does not satisfy response_format.json_schema.",
+                ));
+            }
+        }
+        Some(ResponseFormat::JsonObject) => {
+            if !structured.is_some_and(serde_json::Value::is_object) {
+                return Err(semantic_schema_error(
+                    "The selected semantic variant does not contain a JSON object.",
+                ));
+            }
+        }
+        Some(ResponseFormat::Text) | None => {}
+    }
+    Ok(())
+}
+
+fn semantic_schema_error(message: &str) -> ApiError {
+    ApiError::invalid_request(message)
+        .with_param("response_format")
+        .with_code("semantic_schema_error")
 }
 
 /// Prometheus text exposition; only mounted when --metrics is set.

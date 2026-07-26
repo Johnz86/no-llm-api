@@ -21,7 +21,7 @@ use crate::model::{
     ChatCompletionMessageToolCallChunk, ChatCompletionResponse, ChatRole, FunctionCallChunk,
 };
 use crate::service::{PreparedCompletion, chunk_from_delta, usage_chunk};
-use crate::sim::scenario::{Fault, FaultKind, Timing};
+use crate::sim::scenario::{Fault, FaultKind, FaultStage, Timing};
 
 /// Counts streams abandoned by the consumer before the terminal frame.
 #[derive(Debug, Default)]
@@ -32,7 +32,7 @@ impl CancelCounter {
         self.0.load(Ordering::Relaxed)
     }
 
-    fn record(&self) {
+    pub(crate) fn record(&self) {
         self.0.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -366,7 +366,7 @@ pub fn sse_stream(
         let mut rng = StdRng::seed_from_u64(plan.seed);
         let fires = plan.fault.kind != FaultKind::None
             && (plan.fault.rate >= 1.0 || rng.random::<f64>() < plan.fault.rate);
-        let trigger_at = plan.fault.after_frames.unwrap_or(2) as usize;
+        let trigger_at = fault_trigger_index(&plan.fault, &plan.frames);
 
         if !plan.ttft.is_zero() {
             tokio::time::sleep(plan.ttft).await;
@@ -427,6 +427,32 @@ pub fn sse_stream(
             }
         }
 
+
+        if fires && trigger_at == plan.frames.len() {
+            match plan.fault.kind {
+                FaultKind::Drop => {
+                    guard.done = true;
+                    return;
+                }
+                FaultKind::SseError => {
+                    yield Ok(error_event(
+                        "The server had an error while processing your request.",
+                        "server_error",
+                    ));
+                    yield Ok(done_event());
+                    guard.done = true;
+                    return;
+                }
+                FaultKind::Stall => {
+                    tokio::time::sleep(Duration::from_millis(
+                        plan.fault.after_ms.unwrap_or(30_000),
+                    ))
+                    .await;
+                }
+                _ => {}
+            }
+        }
+
         // One terminal frame per choice, each carrying its own finish_reason.
         for (choice_index, choice) in plan.response.choices.iter().enumerate() {
             let final_chunk = chunk_from_delta(
@@ -450,6 +476,37 @@ pub fn sse_stream(
         yield Ok(done_event());
         guard.done = true;
     }
+}
+
+fn fault_trigger_index(fault: &Fault, frames: &[(usize, ChatCompletionChunkDelta)]) -> usize {
+    let Some(stage) = fault.stage else {
+        return fault.after_frames.unwrap_or(2) as usize;
+    };
+    if stage == FaultStage::Terminal {
+        return frames.len();
+    }
+    let offset = fault.after_frames.unwrap_or(0) as usize;
+    frames
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, delta))| delta_stage(delta) == Some(stage))
+        .nth(offset)
+        .map_or(usize::MAX, |(index, _)| index)
+}
+
+fn delta_stage(delta: &ChatCompletionChunkDelta) -> Option<FaultStage> {
+    if delta.reasoning_content.is_some() {
+        return Some(FaultStage::Reasoning);
+    }
+    let visible_content = delta
+        .content
+        .as_ref()
+        .is_some_and(|content| !content.is_empty());
+    (visible_content
+        || delta.refusal.is_some()
+        || delta.tool_calls.is_some()
+        || delta.function_call.is_some())
+    .then_some(FaultStage::Output)
 }
 
 /// A spec-shaped error delivered inside the stream, the way the API does it.
@@ -524,6 +581,62 @@ mod tests {
             let pieces = pieces_for(text);
             assert_eq!(pieces.concat(), text, "round trip failed for {text:?}");
         }
+    }
+
+    #[test]
+    fn stage_trigger_uses_semantic_boundaries_and_frame_offsets() {
+        let frames = vec![
+            (
+                0,
+                ChatCompletionChunkDelta {
+                    role: Some(ChatRole::Assistant),
+                    content: Some(String::new()),
+                    ..Default::default()
+                },
+            ),
+            (
+                0,
+                ChatCompletionChunkDelta {
+                    reasoning_content: Some("think".to_string()),
+                    ..Default::default()
+                },
+            ),
+            (
+                0,
+                ChatCompletionChunkDelta {
+                    content: Some("one".to_string()),
+                    ..Default::default()
+                },
+            ),
+            (
+                0,
+                ChatCompletionChunkDelta {
+                    content: Some("two".to_string()),
+                    ..Default::default()
+                },
+            ),
+        ];
+        let fault = Fault {
+            stage: Some(FaultStage::Reasoning),
+            ..Default::default()
+        };
+        assert_eq!(fault_trigger_index(&fault, &frames), 1);
+        let fault = Fault {
+            stage: Some(FaultStage::Output),
+            after_frames: Some(1),
+            ..Default::default()
+        };
+        assert_eq!(fault_trigger_index(&fault, &frames), 3);
+        let fault = Fault {
+            stage: Some(FaultStage::Terminal),
+            ..Default::default()
+        };
+        assert_eq!(fault_trigger_index(&fault, &frames), frames.len());
+        let fault = Fault {
+            after_frames: Some(2),
+            ..Default::default()
+        };
+        assert_eq!(fault_trigger_index(&fault, &frames), 2);
     }
 
     #[test]

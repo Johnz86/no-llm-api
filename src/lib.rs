@@ -1,4 +1,5 @@
 pub mod config;
+pub mod conversations;
 pub mod dataset;
 pub mod fixtures;
 pub mod http;
@@ -11,6 +12,7 @@ pub mod live;
 pub mod model;
 pub mod models;
 pub mod request_types;
+pub mod responses;
 pub mod service;
 pub mod sim;
 pub mod store;

@@ -15,7 +15,11 @@ use crate::model::{
 };
 use crate::sim::digest::Digest;
 use crate::sim::identity::{Clock, Identity, IdentityMode, SystemClock};
-use crate::sim::select::{MatchKind, ScriptIndex, SelectionKey};
+use crate::sim::plan::{SemanticOutput, SemanticResponsePlan};
+use crate::sim::script::TerminalStatus;
+#[cfg(feature = "live")]
+use crate::sim::select::MatchKind;
+use crate::sim::select::{ScriptIndex, SelectionKey};
 use crate::store::{CompletionStore, ListFilters, SortOrder, StoredCompletion};
 use thiserror::Error;
 
@@ -49,7 +53,16 @@ pub struct PreparedCompletion {
     /// One token sequence per choice; `n > 1` streams them interleaved.
     pub token_sets: Vec<Vec<u32>>,
     pub include_usage_chunk: bool,
-    pub match_kind: MatchKind,
+    pub match_kind: String,
+    pub semantic: Option<SemanticDiagnostics>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SemanticDiagnostics {
+    pub dataset_revision: String,
+    pub case_id: String,
+    pub variant_id: String,
+    pub plan_digest: String,
 }
 
 impl ChatService {
@@ -134,6 +147,171 @@ impl ChatService {
             #[cfg(feature = "live")]
             ChatBackend::Live(live) => self.create_completion_live(live, request).await,
         }
+    }
+
+    pub async fn create_semantic_completion(
+        &self,
+        request: ChatCompletionRequest,
+        plan: &SemanticResponsePlan,
+    ) -> Result<PreparedCompletion, ServiceError> {
+        let include_usage_chunk = request
+            .stream_options
+            .as_ref()
+            .is_some_and(|options| options.include_usage);
+        let mut reasoning_content = None;
+        let mut visible = String::new();
+        let mut refusal = None;
+        for output in &plan.output {
+            match output {
+                SemanticOutput::Reasoning { trace, .. } => reasoning_content = trace.clone(),
+                SemanticOutput::Text { text } => visible.push_str(text),
+                SemanticOutput::Refusal { text } => refusal = Some(text.clone()),
+                SemanticOutput::Structured { json, .. } => visible.push_str(json),
+            }
+        }
+
+        let mut tokens = self.tokenizer.encode_with_special_tokens(&visible);
+        let mut refusal_tokens = refusal
+            .as_deref()
+            .map(|text| self.tokenizer.encode_with_special_tokens(text))
+            .unwrap_or_default();
+        let full_reasoning_tokens = if plan.usage.reasoning_tokens > 0 {
+            plan.usage.reasoning_tokens
+        } else {
+            reasoning_content
+                .as_deref()
+                .map(|text| self.tokenizer.encode_with_special_tokens(text).len() as u32)
+                .unwrap_or(0)
+        };
+        let mut reasoning_tokens = full_reasoning_tokens;
+        let mut finish_reason = match plan.terminal {
+            TerminalStatus::Completed => FinishReason::Stop,
+            TerminalStatus::Incomplete | TerminalStatus::Failed | TerminalStatus::Cancelled => {
+                FinishReason::Length
+            }
+        };
+        if let Some(cap) = request.max_completion_tokens.or(request.max_tokens)
+            && cap < full_reasoning_tokens + tokens.len() as u32 + refusal_tokens.len() as u32
+        {
+            reasoning_tokens = full_reasoning_tokens.min(cap);
+            reasoning_content = truncate_reasoning(
+                reasoning_content.as_deref(),
+                reasoning_tokens,
+                full_reasoning_tokens,
+                &self.tokenizer,
+            );
+            let mut remaining = cap.saturating_sub(reasoning_tokens) as usize;
+            if remaining < tokens.len() {
+                tokens.truncate(remaining);
+                visible = self
+                    .tokenizer
+                    .decode(&tokens)
+                    .expect("tokens produced by the configured tokenizer decode");
+                refusal = None;
+                refusal_tokens.clear();
+            } else {
+                remaining -= tokens.len();
+                if remaining < refusal_tokens.len() {
+                    refusal_tokens.truncate(remaining);
+                    refusal = Some(
+                        self.tokenizer
+                            .decode(&refusal_tokens)
+                            .expect("tokens produced by the configured tokenizer decode"),
+                    );
+                }
+            }
+            finish_reason = FinishReason::Length;
+        }
+
+        let prompt_tokens = count_prompt_tokens(&request.messages, &self.tokenizer);
+        let requested = request.n.unwrap_or(1).max(1) as usize;
+        let output_tokens = tokens.len() as u32 + refusal_tokens.len() as u32;
+        let completion_tokens = (output_tokens + reasoning_tokens) * requested as u32;
+        let usage = ChatCompletionUsage {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens: prompt_tokens + completion_tokens,
+            prompt_tokens_details: None,
+            completion_tokens_details: (reasoning_tokens > 0).then_some(
+                crate::model::CompletionTokensDetails {
+                    reasoning_tokens: Some(reasoning_tokens * requested as u32),
+                    ..Default::default()
+                },
+            ),
+        };
+        let completion_message = ChatCompletionResponseMessage {
+            role: ChatRole::Assistant,
+            content: (!visible.is_empty()).then_some(MessageContent::Text(visible)),
+            refusal,
+            reasoning_content,
+            tool_calls: None,
+            function_call: None,
+            audio: None,
+        };
+        let choices = (0..requested)
+            .map(|index| ChatCompletionChoice {
+                index,
+                message: completion_message.clone(),
+                finish_reason: Some(finish_reason.clone()),
+                logprobs: None,
+            })
+            .collect();
+        let token_sets = (0..requested).map(|_| tokens.clone()).collect();
+        let plan_digest = u64::from_str_radix(&plan.plan_digest, 16)
+            .expect("semantic plan digest is a hexadecimal u64");
+        let identity = Identity::derive(plan_digest, self.identity_mode, self.clock.as_ref());
+        let response = ChatCompletionResponse {
+            id: identity.id.clone(),
+            object: "chat.completion".to_string(),
+            created: identity.created,
+            model: request.model.clone(),
+            usage,
+            choices,
+            metadata: request.metadata.clone(),
+            system_fingerprint: Some(identity.system_fingerprint),
+            service_tier: request
+                .service_tier
+                .or(Some(crate::request_types::ServiceTier::Default)),
+            request_id: Some(identity.request_id),
+            temperature: request.temperature.or(Some(1.0)),
+            top_p: request.top_p.or(Some(1.0)),
+            frequency_penalty: request.frequency_penalty.or(Some(0.0)),
+            presence_penalty: request.presence_penalty.or(Some(0.0)),
+            stop: request.stop.clone(),
+            seed: request.seed,
+            tool_choice: request.tool_choice.clone(),
+            response_format: request.response_format.clone(),
+            parallel_tool_calls: request.parallel_tool_calls,
+            modalities: request.modalities.clone(),
+            response_prefix: request.response_prefix.clone(),
+            logit_bias: request.logit_bias.clone(),
+            stream_options: request.stream_options.clone(),
+            audio: request.audio.clone(),
+            tools: request.tools.clone(),
+            input_user: request.user.clone(),
+        };
+        if request.store.unwrap_or(false) {
+            let stored_messages =
+                build_stored_messages(&identity.id, &request.messages, &completion_message);
+            self.store.save(response.clone(), stored_messages).await;
+        }
+        Ok(PreparedCompletion {
+            response,
+            token_sets,
+            include_usage_chunk,
+            match_kind: match plan.explanation.match_kind {
+                crate::sim::plan::SemanticMatchKind::Explicit => "explicit",
+                crate::sim::plan::SemanticMatchKind::Exact => "exact",
+                crate::sim::plan::SemanticMatchKind::DigestFallback => "digest_fallback",
+            }
+            .to_string(),
+            semantic: Some(SemanticDiagnostics {
+                dataset_revision: plan.explanation.effective_controls.dataset_revision.clone(),
+                case_id: plan.case_id.clone(),
+                variant_id: plan.variant_id.clone(),
+                plan_digest: plan.plan_digest.clone(),
+            }),
+        })
     }
 
     async fn create_completion_dataset(
@@ -362,7 +540,8 @@ impl ChatService {
             response,
             token_sets,
             include_usage_chunk,
-            match_kind: selection.kind,
+            match_kind: selection.kind.as_str().to_string(),
+            semantic: None,
         })
     }
 
@@ -398,7 +577,8 @@ impl ChatService {
             response,
             token_sets: vec![live.tokens],
             include_usage_chunk,
-            match_kind: MatchKind::Fallback,
+            match_kind: MatchKind::Fallback.as_str().to_string(),
+            semantic: None,
         })
     }
 
@@ -437,6 +617,29 @@ impl ChatService {
     ) -> Option<Vec<StoredMessage>> {
         self.store.messages(id, order, after, limit).await
     }
+}
+
+fn truncate_reasoning(
+    reasoning: Option<&str>,
+    used_tokens: u32,
+    full_tokens: u32,
+    tokenizer: &CoreBPE,
+) -> Option<String> {
+    let reasoning = reasoning?;
+    if used_tokens == 0 {
+        return None;
+    }
+    if used_tokens >= full_tokens || full_tokens == 0 {
+        return Some(reasoning.to_string());
+    }
+    let mut tokens = tokenizer.encode_with_special_tokens(reasoning);
+    let proportional =
+        ((tokens.len() as u64 * u64::from(used_tokens)).div_ceil(u64::from(full_tokens))) as usize;
+    tokens.truncate(proportional.max(1));
+    tokenizer
+        .decode(&tokens)
+        .ok()
+        .filter(|text| !text.is_empty())
 }
 
 fn build_stored_messages(

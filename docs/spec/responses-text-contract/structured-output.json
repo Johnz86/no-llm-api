@@ -1,0 +1,337 @@
+{
+  "case": "structured-output",
+  "events": [
+    {
+      "response": {
+        "id": "resp_72ab33b83f27d1f7e3cb58be",
+        "object": "response",
+        "output": [],
+        "status": "in_progress"
+      },
+      "sequence_number": 0,
+      "type": "response.created"
+    },
+    {
+      "response": {
+        "id": "resp_72ab33b83f27d1f7e3cb58be",
+        "object": "response",
+        "output": [],
+        "status": "in_progress"
+      },
+      "sequence_number": 1,
+      "type": "response.in_progress"
+    },
+    {
+      "item": {
+        "content": [],
+        "id": "msg_72ab33b83f27d1f7",
+        "role": "assistant",
+        "status": "in_progress",
+        "type": "message"
+      },
+      "output_index": 0,
+      "sequence_number": 2,
+      "type": "response.output_item.added"
+    },
+    {
+      "content_index": 0,
+      "item_id": "msg_72ab33b83f27d1f7",
+      "output_index": 0,
+      "part": {
+        "annotations": [],
+        "logprobs": [],
+        "text": "",
+        "type": "output_text"
+      },
+      "sequence_number": 3,
+      "type": "response.content_part.added"
+    },
+    {
+      "content_index": 0,
+      "delta": "{\"",
+      "item_id": "msg_72ab33b83f27d1f7",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 4,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": "status",
+      "item_id": "msg_72ab33b83f27d1f7",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 5,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": "\":\"",
+      "item_id": "msg_72ab33b83f27d1f7",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 6,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": "green",
+      "item_id": "msg_72ab33b83f27d1f7",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 7,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": "\",\"",
+      "item_id": "msg_72ab33b83f27d1f7",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 8,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": "block",
+      "item_id": "msg_72ab33b83f27d1f7",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 9,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": "ers",
+      "item_id": "msg_72ab33b83f27d1f7",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 10,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": "\":",
+      "item_id": "msg_72ab33b83f27d1f7",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 11,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": "0",
+      "item_id": "msg_72ab33b83f27d1f7",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 12,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": "}",
+      "item_id": "msg_72ab33b83f27d1f7",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 13,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "item_id": "msg_72ab33b83f27d1f7",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 14,
+      "text": "{\"status\":\"green\",\"blockers\":0}",
+      "type": "response.output_text.done"
+    },
+    {
+      "content_index": 0,
+      "item_id": "msg_72ab33b83f27d1f7",
+      "output_index": 0,
+      "part": {
+        "annotations": [],
+        "logprobs": [],
+        "text": "{\"status\":\"green\",\"blockers\":0}",
+        "type": "output_text"
+      },
+      "sequence_number": 15,
+      "type": "response.content_part.done"
+    },
+    {
+      "item": {
+        "content": [
+          {
+            "annotations": [],
+            "logprobs": [],
+            "text": "{\"status\":\"green\",\"blockers\":0}",
+            "type": "output_text"
+          }
+        ],
+        "id": "msg_72ab33b83f27d1f7",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
+      },
+      "output_index": 0,
+      "sequence_number": 16,
+      "type": "response.output_item.done"
+    },
+    {
+      "response": {
+        "completed_at": 1741057784,
+        "conversation": null,
+        "created_at": 1741057783,
+        "error": null,
+        "id": "resp_72ab33b83f27d1f7e3cb58be",
+        "incomplete_details": null,
+        "instructions": null,
+        "max_output_tokens": null,
+        "metadata": {},
+        "model": "mock-gpt-4o",
+        "object": "response",
+        "output": [
+          {
+            "content": [
+              {
+                "annotations": [],
+                "logprobs": [],
+                "text": "{\"status\":\"green\",\"blockers\":0}",
+                "type": "output_text"
+              }
+            ],
+            "id": "msg_72ab33b83f27d1f7",
+            "role": "assistant",
+            "status": "completed",
+            "type": "message"
+          }
+        ],
+        "output_text": "{\"status\":\"green\",\"blockers\":0}",
+        "parallel_tool_calls": true,
+        "previous_response_id": null,
+        "reasoning": null,
+        "status": "completed",
+        "store": true,
+        "temperature": null,
+        "text": {
+          "format": {
+            "name": "release-status",
+            "strict": true,
+            "type": "json_schema"
+          }
+        },
+        "tool_choice": "auto",
+        "tools": [],
+        "top_p": null,
+        "usage": {
+          "input_tokens": 4,
+          "input_tokens_details": {
+            "cache_write_tokens": 0,
+            "cached_tokens": 0
+          },
+          "output_tokens": 10,
+          "output_tokens_details": {
+            "reasoning_tokens": 0
+          },
+          "total_tokens": 14
+        }
+      },
+      "sequence_number": 17,
+      "type": "response.completed"
+    }
+  ],
+  "request": {
+    "input": "Report release status.",
+    "model": "mock-gpt-4o",
+    "stream": false,
+    "text": {
+      "format": {
+        "name": "release-status",
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "blockers": {
+              "type": "integer"
+            },
+            "status": {
+              "enum": [
+                "green",
+                "red"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "blockers"
+          ],
+          "type": "object"
+        },
+        "strict": true,
+        "type": "json_schema"
+      }
+    }
+  },
+  "response": {
+    "completed_at": 1741057784,
+    "conversation": null,
+    "created_at": 1741057783,
+    "error": null,
+    "id": "resp_72ab33b83f27d1f7e3cb58be",
+    "incomplete_details": null,
+    "instructions": null,
+    "max_output_tokens": null,
+    "metadata": {},
+    "model": "mock-gpt-4o",
+    "object": "response",
+    "output": [
+      {
+        "content": [
+          {
+            "annotations": [],
+            "logprobs": [],
+            "text": "{\"status\":\"green\",\"blockers\":0}",
+            "type": "output_text"
+          }
+        ],
+        "id": "msg_72ab33b83f27d1f7",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
+      }
+    ],
+    "output_text": "{\"status\":\"green\",\"blockers\":0}",
+    "parallel_tool_calls": true,
+    "previous_response_id": null,
+    "reasoning": null,
+    "status": "completed",
+    "store": true,
+    "temperature": null,
+    "text": {
+      "format": {
+        "name": "release-status",
+        "strict": true,
+        "type": "json_schema"
+      }
+    },
+    "tool_choice": "auto",
+    "tools": [],
+    "top_p": null,
+    "usage": {
+      "input_tokens": 4,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0
+      },
+      "output_tokens": 10,
+      "output_tokens_details": {
+        "reasoning_tokens": 0
+      },
+      "total_tokens": 14
+    }
+  },
+  "semantic_output": {
+    "blockers": 0,
+    "status": "green"
+  }
+}

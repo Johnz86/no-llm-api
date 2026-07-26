@@ -39,6 +39,7 @@ default to `main`.
 | File | Tracked | What it is |
 | --- | --- | --- |
 | `docs/spec/chat-completions.openapi.yaml` | yes | The pruned extract: the five paths this mock implements plus their transitively referenced schemas, 144 KB. Generated, never hand-edited. |
+| `docs/spec/responses-text-contract/manifest.json` | yes | The exact upstream revision and official SDK version used by the pre-implementation Responses text contract corpus. |
 | `openapi.provenance.json` | yes | URL, upstream commit, date and sha256 of the full document the extract came from. |
 | `openapi.yaml` | no | The full 2.7 MB upstream document. Fetch it with `scripts/fetch-openapi.ps1` (or `.sh`) when you need to grep the whole surface. |
 

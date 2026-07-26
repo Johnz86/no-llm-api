@@ -1,0 +1,4 @@
+name: state-expired
+description: Deterministically reject continuation from every stored predecessor as expired.
+state:
+  expire_previous_response: true

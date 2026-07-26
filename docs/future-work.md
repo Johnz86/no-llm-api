@@ -6,10 +6,12 @@ commitment, or description of current behavior.
 
 ## Stable baseline
 
-The current product is a deterministic, single-process test double for OpenAI Chat Completions. Its
-core value is reproducible fixture selection, realistic streaming, controlled failure simulation,
-and offline operation by default. Future work preserves these properties unless a new product scope
-explicitly replaces them.
+The current product is a deterministic, single-process test double for OpenAI Chat Completions and
+the experimental text/reasoning Responses and Conversations surface. It includes typed SSE,
+reasoning effort and summaries, opaque reasoning replay, strict fixture-owned structured-output
+schemas, predecessor and conversation state, lifecycle/fault simulation, and official-client tests.
+Future work preserves reproducible selection, realistic streaming, controlled failure simulation,
+and offline operation unless a new product scope explicitly replaces those properties.
 
 The following constraints remain useful design boundaries:
 
@@ -22,16 +24,26 @@ The following constraints remain useful design boundaries:
 
 ## Candidate product directions
 
-### Responses API
+### Responses tools, MCP, and skills
 
-Support for `POST /v1/responses` is the largest adjacent product direction. It requires its own input
-model, output item graph, event taxonomy, streaming state machine, tool-call representation,
-persistence rules, and compatibility tests. It belongs in a separate design cycle rather than as an
-alias over Chat Completions.
+The next Responses expansion is typed tool behavior: function calls and outputs, hosted-tool items,
+MCP discovery/approval/call lifecycles, and skill references or inline skill payloads. This requires
+fixture schemas for call graphs, deterministic ids and arguments, request-controlled approval and
+failure paths, reserved tool-stage SSE events, and replay validation across multiple turns.
 
-Start this work only when a target client depends on Responses API behavior. Begin with a recorded
-wire contract and the smallest event subset that completes that client's normal chat flow. Preserve
-unknown-event forward compatibility and avoid translating through loosely typed JSON values.
+Implement these as typed output/input items and event schedules. Do not tunnel them through generic
+JSON, reuse Chat tool deltas, or expose a capability in the model catalogue before its normal,
+streaming, error, and official-client cases are executable.
+
+### Images, audio, and realtime conversation
+
+Image generation needs deterministic binary fixtures, format/size/quality controls, revised item
+events, and byte/hash assertions. Speech generation and Whisper-style transcription need binary and
+multipart transports, media datasets, timestamps, and platform-independent golden assets.
+
+Realtime or conversational audio adds WebSocket session state, duplex event ordering, interruption,
+turn detection, cancellation, and reproducible timing. It should follow the completed request/response
+audio endpoints rather than being introduced as a loosely simulated socket.
 
 ### Additional OpenAI-compatible endpoints
 
@@ -45,24 +57,22 @@ Embeddings and moderation can use deterministic synthetic values. Audio requires
 binary output, media fixtures, and substantially different test infrastructure. Each endpoint enters
 scope only with a concrete consumer and captured request/response examples.
 
-### Stateful conversations and shared persistence
+### Durable and distributed state
 
-The server currently expects clients to resend conversation history and keeps explicitly stored
-completions in process memory. Future clients may require conversation affinity, durable storage, or
-coordination across replicas.
+Responses, predecessors, and conversations currently live in process memory with explicit reset,
+deletion, and optimistic conflict semantics. Future clients may require durable storage,
+conversation affinity, or coordination across replicas.
 
 A stateful design must define ownership, expiry, reset semantics, deterministic replay, concurrent
 updates, and failure recovery before choosing a database. Session metadata must not silently alter
 fixture selection for existing stateless clients.
 
-### Richer structured-output validation
+### Broader structured-output dialects
 
-Fixtures can represent JSON and structured-output responses, while runtime JSON Schema enforcement
-is outside the current scope. A future implementation may validate fixture output against a request's
-`json_schema`, synthesize deterministic validation failures, and expose schema-specific diagnostics.
-
-This direction needs a bounded JSON Schema dialect, explicit behavior for unsupported keywords, and
-tests that prevent the validator dependency from changing otherwise identical response bytes.
+The current compiler intentionally allows a bounded offline JSON Schema keyword set and explicit
+negative variants. Future demand may justify more draft keywords, grammars, or schema dialects.
+Every addition needs a pinned dialect, offline reference rules, compatibility reporting, and proof
+that validator upgrades do not change existing authored bytes or error envelopes.
 
 ### Expanded observability
 
@@ -85,8 +95,9 @@ depends on an explicit shared-state contract.
 
 ### Broader client compatibility
 
-Open WebUI and the real `async-openai` client provide the current external contracts. A future cycle
-may add continuously tested flows for LibreChat, Jan, openai-js, the Vercel AI SDK, or other clients.
+Open WebUI, `async-openai`, and the official JavaScript `openai` client provide the current external
+contracts. A future cycle may add continuously tested flows for LibreChat, Jan, the Vercel AI SDK,
+or other clients.
 Each integration earns permanent automation only when it exercises behavior not already covered by
 the protocol-level suite.
 

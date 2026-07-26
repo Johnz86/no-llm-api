@@ -84,6 +84,7 @@ pub fn router(state: AppState) -> Router {
         .route("/_mock/reset", post(reset))
         .route("/_mock/models", get(models))
         .route("/_mock/requests", get(requests))
+        .route("/_mock/responses", get(responses))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             require_control_token,
@@ -151,6 +152,8 @@ async fn patch_scenario(
 async fn reset(State(state): State<AppState>) -> impl IntoResponse {
     state.scenario.store(state.boot_scenario.clone());
     state.log.clear();
+    state.responses.clear().await;
+    state.conversations.clear().await;
     Json(state.boot_scenario.as_ref().clone())
 }
 
@@ -160,6 +163,13 @@ async fn models(State(state): State<AppState>) -> impl IntoResponse {
 
 async fn requests(State(state): State<AppState>) -> impl IntoResponse {
     Json(serde_json::json!({ "object": "list", "data": state.log.snapshot() }))
+}
+
+async fn responses(State(state): State<AppState>) -> impl IntoResponse {
+    Json(serde_json::json!({
+        "object": "list",
+        "data": state.responses.snapshot().await,
+    }))
 }
 
 /// Recursive object merge; scalars and arrays replace wholesale.

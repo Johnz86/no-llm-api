@@ -1,0 +1,17 @@
+schema_version: 2
+id: response-cancelled
+description: Authored partial output ending in deterministic cancellation.
+tags: [text, lifecycle, cancelled]
+interfaces: [responses]
+match:
+  models: [mock-gpt-4o]
+  turns:
+    - role: user
+      text: Simulate a cancelled deployment summary.
+cases:
+  - id: client-cancelled
+    default_variant: partial
+    variants:
+      partial:
+        answer: Deployment
+    terminal: cancelled

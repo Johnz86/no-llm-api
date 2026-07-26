@@ -53,6 +53,10 @@ pub struct Capabilities {
     pub audio: bool,
     #[serde(default)]
     pub reasoning: bool,
+    #[serde(default)]
+    pub reasoning_efforts: Vec<String>,
+    #[serde(default)]
+    pub structured_output: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -107,7 +111,11 @@ impl ModelCatalogue {
 
     /// Built-in catalogue: the zero-configuration default.
     pub fn builtin() -> Self {
-        Self::from_ids(["mock-gpt-4o", "mock-gpt-4o-mini", "mock-reasoner"])
+        Self::from_entries(vec![
+            builtin_entry("mock-gpt-4o", false),
+            builtin_entry("mock-gpt-4o-mini", false),
+            builtin_entry("mock-reasoner", true),
+        ])
     }
 
     pub fn from_ids<I, S>(ids: I) -> Self
@@ -210,6 +218,30 @@ impl ModelCatalogue {
     }
 }
 
+fn builtin_entry(id: &str, reasoning: bool) -> ModelEntry {
+    ModelEntry {
+        id: id.to_string(),
+        created: default_created(),
+        owned_by: default_owner(),
+        profile: ModelProfile {
+            capabilities: Capabilities {
+                reasoning,
+                reasoning_efforts: if reasoning {
+                    ["low", "medium", "high"]
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect()
+                } else {
+                    Vec::new()
+                },
+                structured_output: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    }
+}
+
 fn to_model(entry: &ModelEntry) -> Model {
     Model {
         id: entry.id.clone(),
@@ -243,6 +275,13 @@ mod tests {
             assert_eq!(model.object, "model");
             assert_eq!(model.owned_by, "no-llm-api");
         }
+        let reasoner = catalogue.profile("mock-reasoner").unwrap();
+        assert!(reasoner.capabilities.reasoning);
+        assert_eq!(
+            reasoner.capabilities.reasoning_efforts,
+            ["low", "medium", "high"]
+        );
+        assert!(reasoner.capabilities.structured_output);
     }
 
     #[test]

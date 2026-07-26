@@ -1,0 +1,46 @@
+{
+  "version": "semantic-plan-v1",
+  "fixture_id": "reasoning-effort",
+  "case_id": "release-decision",
+  "variant_id": "high",
+  "interface": "chat_completions",
+  "model": "mock-reasoner",
+  "output": [
+    {
+      "type": "reasoning",
+      "summary": "Compared readiness, blockers, rollback coverage, ownership, and recovery time.",
+      "trace": "Compared readiness, blockers, rollback coverage, ownership, and recovery time.",
+      "encrypted": null
+    },
+    {
+      "type": "text",
+      "text": "Ship release B."
+    }
+  ],
+  "terminal": "completed",
+  "usage": {
+    "reasoning_tokens": 28
+  },
+  "plan_digest": "f906fdd12e3da23b",
+  "explanation": {
+    "match_kind": "exact",
+    "fixture_id": "reasoning-effort",
+    "case_id": "release-decision",
+    "variant_id": "high",
+    "variant_reason": "exact_effort",
+    "canonical_request_digest": "35fdbd5b1873c397",
+    "turn_shapes": [
+      {
+        "role": "user",
+        "content_kind": "text",
+        "content_bytes": 26
+      }
+    ],
+    "effective_controls": {
+      "dataset_revision": "639cb1a9676a8f55",
+      "scenario_revision": "default-v1",
+      "model_profile_revision": "builtin-v1",
+      "simulation_seed": null
+    }
+  }
+}

@@ -1,0 +1,17 @@
+schema_version: 2
+id: response-unicode
+description: Unicode text spanning combining marks, emoji, ZWJ, and CJK boundaries.
+tags: [text, unicode, streaming]
+interfaces: [responses]
+match:
+  models: [mock-gpt-4o]
+  turns:
+    - role: user
+      text: Return the Unicode boundary sample.
+cases:
+  - id: boundary-sample
+    default_variant: default
+    variants:
+      default:
+        answer: "cafe\u0301 \U0001F680\U0001F44D \U0001F469\u200D\U0001F4BB \u4F60\u597D\u4E16\u754C done"
+    terminal: completed

@@ -1,7 +1,7 @@
 //! Prunes the upstream OpenAPI document down to the surface this mock implements.
 //!
 //! The full spec is 2.7 MB, which is unreviewable in a diff and pointless to track:
-//! the parts we assert against are the chat-completion and model paths plus the
+//! the parts we assert against are the Chat, Responses, and model paths plus the
 //! schemas they transitively reference. This produces exactly that, so line
 //! citations in the plans point at something a fresh clone actually has.
 
@@ -14,12 +14,18 @@ use serde::Deserialize;
 use serde_yaml_ng::{Mapping, Value};
 
 /// Paths the mock implements, and therefore the only ones worth keeping.
-const KEEP_PATHS: [&str; 5] = [
+const KEEP_PATHS: [&str; 11] = [
     "/chat/completions",
     "/chat/completions/{completion_id}",
     "/chat/completions/{completion_id}/messages",
     "/models",
     "/models/{model}",
+    "/responses",
+    "/responses/{response_id}",
+    "/conversations",
+    "/conversations/{conversation_id}",
+    "/conversations/{conversation_id}/items",
+    "/conversations/{conversation_id}/items/{item_id}",
 ];
 
 /// Schemas the mock asserts against even though the kept paths do not reference
@@ -30,7 +36,7 @@ const KEEP_SCHEMAS: [&str; 3] = ["Error", "ErrorResponse", "ServiceTier"];
 #[derive(Debug, Parser)]
 #[command(
     name = "spec_extract",
-    about = "Prune the upstream OpenAPI spec to the chat-completions surface"
+    about = "Prune the upstream OpenAPI spec to the implemented API surface"
 )]
 struct Cli {
     #[arg(long, default_value = "openapi.yaml")]

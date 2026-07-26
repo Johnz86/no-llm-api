@@ -1,0 +1,10 @@
+{
+  "model": "mock-reasoner",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Which release should ship?"
+    }
+  ],
+  "reasoning_effort": "high"
+}

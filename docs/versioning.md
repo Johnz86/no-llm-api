@@ -18,6 +18,13 @@ Version `1.0.0` establishes the current Chat Completions wire contract, determin
 selection, configuration surface, and scenario behavior as the stable compatibility baseline.
 Semantic Versioning applies to every release after that baseline.
 
+The Responses and Conversations surface is additive and explicitly experimental in `1.x`. Its
+pinned text/reasoning corpus, item identities, and event ordering are still reviewed as wire
+behavior, but extending that experimental surface does not by itself require `2.0.0`. Declaring the
+surface stable, or incompatibly changing the stable Chat/configuration contract, is the major-version
+boundary. The text/reasoning implementation therefore remains version `1.0.0` for the first
+repository release.
+
 ## How a consumer pins behaviour
 
 1. Pin the image tag or the crate version.
@@ -28,11 +35,14 @@ Semantic Versioning applies to every release after that baseline.
 
 ## Release checklist
 
-1. `cargo test` and `cargo clippy --all-targets -- -D warnings` on both the default and
-   `live` feature sets.
-2. Move `CHANGELOG.md`'s `[Unreleased]` section under the new version, keeping the
+1. Run `cargo fmt --all --check`, default/all-feature/all-target/doc tests,
+   `cargo clippy --locked --all-targets --all-features -- -D warnings`, `cargo deny`, and the
+   no-default-feature dependency-tree check that excludes HTTP/TLS clients.
+2. Run `npm --prefix e2e test`, a release build, `cargo package --locked`, and the container build
+   plus readiness probe.
+3. Move `CHANGELOG.md`'s `[Unreleased]` section under the new version, keeping the
    **Wire behaviour** subsection first.
-3. Bump `version` in `Cargo.toml`; `x-no-llm-api-version`, `/health` and `/ready` read
+4. Bump `version` in `Cargo.toml`; `x-no-llm-api-version`, `/health` and `/ready` read
    it from `CARGO_PKG_VERSION`, so nothing else needs editing.
-4. Tag `vX.Y.Z`. The release workflow builds the five target binaries and publishes the
+5. Tag `vX.Y.Z`. The release workflow builds the five target binaries and publishes the
    container image to GHCR.

@@ -6,6 +6,14 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use no_llm_api::dataset::write_dataset;
 use no_llm_api::fixtures::{builtin_sets, load_dir};
+use no_llm_api::model::ChatCompletionRequest;
+use no_llm_api::models::ModelCatalogue;
+use no_llm_api::responses::CreateResponseRequest;
+use no_llm_api::sim::artifact::SemanticArtifact;
+use no_llm_api::sim::canonical::CanonicalRequest;
+use no_llm_api::sim::plan::{SemanticCapabilities, SemanticResponsePlan, compile, explain};
+use no_llm_api::sim::script::{builtin_fixtures, load_dir as load_semantic_dir};
+use tiktoken_rs::cl100k_base;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -34,6 +42,55 @@ enum Command {
     Lint {
         #[arg(long)]
         input: Option<PathBuf>,
+    },
+    /// Check schema-v2 semantic fixtures without compiling legacy parquet.
+    LintSemantic {
+        #[arg(long, default_value = "fixtures/v2")]
+        input: PathBuf,
+    },
+    /// Compile schema-v2 fixtures into a deterministic JSON artifact.
+    BuildSemantic {
+        #[arg(long)]
+        input: Option<PathBuf>,
+        #[arg(long)]
+        models: Option<PathBuf>,
+        #[arg(long, default_value = "data/semantic-fixtures.json")]
+        output: PathBuf,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Explain fixture and variant selection for a Chat request JSON file.
+    ExplainSemantic {
+        #[arg(long)]
+        request: PathBuf,
+        #[arg(long)]
+        input: Option<PathBuf>,
+        #[arg(long)]
+        models: Option<PathBuf>,
+        #[arg(long)]
+        case: Option<String>,
+        #[arg(long)]
+        variant: Option<String>,
+    },
+    /// Print the complete deterministic semantic plan for a Chat request.
+    SnapshotSemantic {
+        #[arg(long)]
+        request: PathBuf,
+        #[arg(long)]
+        input: Option<PathBuf>,
+        #[arg(long)]
+        models: Option<PathBuf>,
+        #[arg(long)]
+        case: Option<String>,
+        #[arg(long)]
+        variant: Option<String>,
+    },
+    /// Compare two compiled semantic artifacts and fail on compatibility drift.
+    CompatibilityReport {
+        #[arg(long)]
+        baseline: PathBuf,
+        #[arg(long)]
+        candidate: PathBuf,
     },
 }
 
@@ -73,8 +130,139 @@ fn main() -> Result<()> {
             }
             println!("{} fixture sets pass", sets.len());
         }
+        Command::LintSemantic { input } => {
+            let fixtures = if input == PathBuf::from("fixtures/v2") {
+                builtin_fixtures()
+            } else {
+                load_semantic_dir(&input)?
+            };
+            for fixture in &fixtures {
+                println!("ok {} ({} cases)", fixture.id, fixture.cases.len());
+            }
+            println!("{} semantic fixtures pass", fixtures.len());
+        }
+        Command::BuildSemantic {
+            input,
+            models,
+            output,
+            force,
+        } => {
+            if output.exists() && !force {
+                anyhow::bail!(
+                    "{} already exists; pass --force to overwrite it",
+                    output.display()
+                );
+            }
+            let fixtures = semantic_fixtures(input)?;
+            let models = semantic_models(models)?;
+            let artifact = SemanticArtifact::compile(&fixtures, &models, &cl100k_base()?)?;
+            if let Some(parent) = output.parent()
+                && !parent.as_os_str().is_empty()
+            {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("creating {}", parent.display()))?;
+            }
+            std::fs::write(&output, artifact.to_bytes())
+                .with_context(|| format!("writing {}", output.display()))?;
+            println!(
+                "wrote {} fixtures and {} variants to {} (digest {})",
+                artifact.fixtures.len(),
+                artifact.variants.len(),
+                output.display(),
+                artifact.digest()
+            );
+        }
+        Command::ExplainSemantic {
+            request,
+            input,
+            models,
+            case,
+            variant,
+        } => {
+            let plan = semantic_plan(&request, input, models, case, variant)?;
+            println!("{}", serde_json::to_string_pretty(&explain(&plan))?);
+        }
+        Command::SnapshotSemantic {
+            request,
+            input,
+            models,
+            case,
+            variant,
+        } => {
+            let plan = semantic_plan(&request, input, models, case, variant)?;
+            println!("{}", serde_json::to_string_pretty(&plan)?);
+        }
+        Command::CompatibilityReport {
+            baseline,
+            candidate,
+        } => {
+            let baseline = read_semantic_artifact(&baseline)?;
+            let candidate = read_semantic_artifact(&candidate)?;
+            let report = baseline.compatibility_report(&candidate);
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if !report.compatible {
+                anyhow::bail!("semantic artifact compatibility check failed");
+            }
+        }
     }
     Ok(())
+}
+
+fn read_semantic_artifact(path: &PathBuf) -> Result<SemanticArtifact> {
+    let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    serde_json::from_slice(&bytes).with_context(|| format!("parsing {}", path.display()))
+}
+
+fn semantic_fixtures(
+    input: Option<PathBuf>,
+) -> Result<Vec<no_llm_api::sim::script::SemanticFixture>> {
+    match input {
+        Some(path) => Ok(load_semantic_dir(&path)?),
+        None => Ok(builtin_fixtures()),
+    }
+}
+
+fn semantic_models(path: Option<PathBuf>) -> Result<ModelCatalogue> {
+    match path {
+        Some(path) => ModelCatalogue::from_path(&path)
+            .with_context(|| format!("loading model catalogue {}", path.display())),
+        None => Ok(ModelCatalogue::builtin()),
+    }
+}
+
+fn semantic_plan(
+    request_path: &PathBuf,
+    input: Option<PathBuf>,
+    models: Option<PathBuf>,
+    case: Option<String>,
+    variant: Option<String>,
+) -> Result<SemanticResponsePlan> {
+    let request_text = std::fs::read_to_string(request_path)
+        .with_context(|| format!("reading {}", request_path.display()))?;
+    let request: serde_json::Value = serde_json::from_str(&request_text)
+        .with_context(|| format!("parsing {}", request_path.display()))?;
+    let (model, canonical) = if request.get("messages").is_some() {
+        let request: ChatCompletionRequest = serde_json::from_value(request)
+            .with_context(|| format!("parsing {} as Chat Completions", request_path.display()))?;
+        (request.model.clone(), CanonicalRequest::from_chat(&request))
+    } else {
+        let request: CreateResponseRequest = serde_json::from_value(request)
+            .with_context(|| format!("parsing {} as Responses", request_path.display()))?;
+        (request.model.clone(), request.canonical_request())
+    };
+    let fixtures = semantic_fixtures(input)?;
+    let models = semantic_models(models)?;
+    let profile = models
+        .profile(&model)
+        .with_context(|| format!("model '{model}' is not in the catalogue"))?;
+    let artifact = SemanticArtifact::compile(&fixtures, &models, &cl100k_base()?)?;
+    let controls = artifact.selection_controls(case, variant);
+    Ok(compile(
+        &fixtures,
+        &canonical,
+        &controls,
+        &SemanticCapabilities::from(profile),
+    )?)
 }
 
 fn sets_from(input: Option<PathBuf>) -> Result<Vec<no_llm_api::fixtures::FixtureSet>> {

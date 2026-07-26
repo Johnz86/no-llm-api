@@ -1,0 +1,17 @@
+schema_version: 2
+id: response-refusal
+description: Authored refusal content for Responses object and event clients.
+tags: [text, safety, refusal]
+interfaces: [responses]
+match:
+  models: [mock-gpt-4o, mock-gpt-4o-mini]
+  turns:
+    - role: user
+      text: Perform the disallowed deployment action.
+cases:
+  - id: policy-refusal
+    default_variant: refusal
+    variants:
+      refusal:
+        refusal: I cannot perform that action, but I can help review a safe deployment plan.
+    terminal: completed

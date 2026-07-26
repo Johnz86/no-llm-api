@@ -8,18 +8,22 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::sim::scenario::{Fault, FaultKind, Scenario, Timing};
+use crate::sim::scenario::{Fault, FaultKind, FaultStage, Scenario, Timing};
 
 /// Overrides parsed from one request.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct Directive {
+    pub case: Option<String>,
+    pub variant: Option<String>,
     pub ttft_ms: Option<u64>,
     pub tokens_per_second: Option<u32>,
     pub jitter_ms: Option<u64>,
     pub chunk_tokens: Option<u32>,
     pub burst_frames: Option<u32>,
+    pub commit_delay_ms: Option<u64>,
     pub fault: Option<String>,
+    pub stage: Option<String>,
     pub status: Option<u16>,
     pub retry_after: Option<u64>,
     pub after_ms: Option<u64>,
@@ -53,7 +57,10 @@ impl Directive {
                 continue;
             };
             match key {
+                "case" => directive.case = non_empty(value),
+                "variant" => directive.variant = non_empty(value),
                 "fault" => directive.absorb_fault_spec(value),
+                "stage" => directive.stage = non_empty(value),
                 "ttft-ms" => directive.ttft_ms = value.trim().parse().ok(),
                 "tps" | "tokens-per-second" => {
                     directive.tokens_per_second = value.trim().parse().ok();
@@ -61,6 +68,7 @@ impl Directive {
                 "jitter-ms" => directive.jitter_ms = value.trim().parse().ok(),
                 "chunk-tokens" => directive.chunk_tokens = value.trim().parse().ok(),
                 "burst-frames" => directive.burst_frames = value.trim().parse().ok(),
+                "commit-delay-ms" => directive.commit_delay_ms = value.trim().parse().ok(),
                 _ => {}
             }
         }
@@ -85,6 +93,7 @@ impl Directive {
                 "after_ms" | "after-ms" => self.after_ms = value.trim().parse().ok(),
                 "after_frames" | "after-frames" => self.after_frames = value.trim().parse().ok(),
                 "rate" => self.rate = value.trim().parse().ok(),
+                "stage" => self.stage = non_empty(value),
                 _ => {}
             }
         }
@@ -93,12 +102,16 @@ impl Directive {
     /// Later directives win, member by member.
     pub fn merge(self, higher: Directive) -> Directive {
         Directive {
+            case: higher.case.or(self.case),
+            variant: higher.variant.or(self.variant),
             ttft_ms: higher.ttft_ms.or(self.ttft_ms),
             tokens_per_second: higher.tokens_per_second.or(self.tokens_per_second),
             jitter_ms: higher.jitter_ms.or(self.jitter_ms),
             chunk_tokens: higher.chunk_tokens.or(self.chunk_tokens),
             burst_frames: higher.burst_frames.or(self.burst_frames),
+            commit_delay_ms: higher.commit_delay_ms.or(self.commit_delay_ms),
             fault: higher.fault.or(self.fault),
+            stage: higher.stage.or(self.stage),
             status: higher.status.or(self.status),
             retry_after: higher.retry_after.or(self.retry_after),
             after_ms: higher.after_ms.or(self.after_ms),
@@ -127,6 +140,9 @@ impl Directive {
         }
 
         let mut fault = scenario.fault.clone();
+        if let Some(stage) = self.stage.as_deref().and_then(FaultStage::parse) {
+            fault.stage = Some(stage);
+        }
         if let Some(kind) = self.fault.as_deref().and_then(FaultKind::parse) {
             fault.kind = kind;
             // An explicit per-request fault is meant to fire.
@@ -150,17 +166,25 @@ impl Directive {
     }
 }
 
+fn non_empty(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn header_fault_spec_carries_its_parameters() {
-        let directive =
-            Directive::from_headers([("X-Simulate-Fault", "http_error;status=429;retry_after=3")]);
+        let directive = Directive::from_headers([(
+            "X-Simulate-Fault",
+            "http_error;status=429;retry_after=3;stage=output",
+        )]);
         assert_eq!(directive.fault.as_deref(), Some("http_error"));
         assert_eq!(directive.status, Some(429));
         assert_eq!(directive.retry_after, Some(3));
+        assert_eq!(directive.stage.as_deref(), Some("output"));
     }
 
     #[test]
@@ -169,10 +193,27 @@ mod tests {
             ("x-simulate-ttft-ms", "250"),
             ("x-simulate-tps", "7"),
             ("x-simulate-jitter-ms", "10"),
+            ("x-simulate-commit-delay-ms", "25"),
         ]);
         assert_eq!(directive.ttft_ms, Some(250));
         assert_eq!(directive.tokens_per_second, Some(7));
         assert_eq!(directive.jitter_ms, Some(10));
+        assert_eq!(directive.commit_delay_ms, Some(25));
+    }
+
+    #[test]
+    fn semantic_selector_headers_are_parsed() {
+        let directive = Directive::from_headers([
+            ("x-simulate-case", " reasoning-effort/release-decision "),
+            ("x-simulate-variant", "high"),
+            ("x-simulate-stage", "reasoning"),
+        ]);
+        assert_eq!(
+            directive.case.as_deref(),
+            Some("reasoning-effort/release-decision")
+        );
+        assert_eq!(directive.variant.as_deref(), Some("high"));
+        assert_eq!(directive.stage.as_deref(), Some("reasoning"));
     }
 
     #[test]
@@ -186,9 +227,22 @@ mod tests {
 
     #[test]
     fn body_directive_overrides_headers() {
-        let header = Directive::from_headers([("x-simulate-tps", "5")]);
-        let body = Directive::from_value(&serde_json::json!({ "tokens_per_second": 9 }));
+        let header = Directive::from_headers([
+            ("x-simulate-case", "basic-text/concise"),
+            ("x-simulate-variant", "default"),
+            ("x-simulate-tps", "5"),
+        ]);
+        let body = Directive::from_value(&serde_json::json!({
+            "case": "reasoning-effort/release-decision",
+            "variant": "high",
+            "tokens_per_second": 9
+        }));
         let merged = header.merge(body);
+        assert_eq!(
+            merged.case.as_deref(),
+            Some("reasoning-effort/release-decision")
+        );
+        assert_eq!(merged.variant.as_deref(), Some("high"));
         assert_eq!(merged.tokens_per_second, Some(9));
     }
 

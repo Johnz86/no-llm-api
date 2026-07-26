@@ -1,0 +1,20 @@
+schema_version: 2
+id: multi-turn-correction
+description: A correction whose answer depends on the full ordered conversation.
+tags: [text, multi-turn, correction]
+interfaces: [chat_completions, responses]
+match:
+  models: [mock-gpt-4o, mock-gpt-4o-mini]
+  turns:
+    - role: user
+      text: Summarize the release in one paragraph.
+    - role: assistant
+      text: The release is ready after validation.
+    - role: user
+      text: 'Correction: use exactly five words.'
+cases:
+  - id: corrected-length
+    default_variant: default
+    variants:
+      default:
+        answer: Release validated; deployment is ready.

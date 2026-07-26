@@ -1,0 +1,17 @@
+schema_version: 2
+id: response-incomplete
+description: Authored partial output ending because the output budget is exhausted.
+tags: [text, lifecycle, incomplete]
+interfaces: [responses]
+match:
+  models: [mock-gpt-4o]
+  turns:
+    - role: user
+      text: Return a partial deployment summary.
+cases:
+  - id: output-limit
+    default_variant: partial
+    variants:
+      partial:
+        answer: Deployment validation reached
+    terminal: incomplete

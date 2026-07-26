@@ -4,7 +4,7 @@ const port = 18080;
 
 export default defineConfig({
   testDir: '.',
-  testMatch: 'chat.spec.ts',
+  testMatch: ['chat.spec.ts', 'responses-client.spec.ts'],
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
