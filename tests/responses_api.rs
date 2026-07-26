@@ -193,6 +193,173 @@ async fn stream_reconstructs_reasoning_then_text_without_a_done_sentinel() {
 }
 
 #[tokio::test]
+async fn terminal_lifecycle_variants_use_response_and_item_specific_statuses() {
+    for (input, terminal, item_status) in [
+        (
+            "Return a partial deployment summary.",
+            "response.incomplete",
+            "incomplete",
+        ),
+        (
+            "Simulate a failed deployment summary.",
+            "response.failed",
+            "incomplete",
+        ),
+        (
+            "Simulate a cancelled deployment summary.",
+            "response.cancelled",
+            "incomplete",
+        ),
+    ] {
+        let fixture = fixture(10_000);
+        let transcript = collect_sse_at(
+            fixture.app,
+            "/v1/responses",
+            json!({
+                "model": "mock-gpt-4o",
+                "input": input,
+                "stream": true
+            }),
+        )
+        .await;
+        let events = transcript.chunks();
+        let terminal_event = events.last().unwrap();
+
+        assert_eq!(terminal_event["type"], terminal);
+        assert_eq!(terminal_event["response"]["status"], &terminal[9..]);
+        assert_eq!(
+            terminal_event["response"]["output"][0]["status"],
+            item_status
+        );
+        assert!(terminal_event["response"]["completed_at"].is_null());
+        match terminal {
+            "response.incomplete" => assert_eq!(
+                terminal_event["response"]["incomplete_details"]["reason"],
+                "max_output_tokens"
+            ),
+            "response.failed" => {
+                assert_eq!(terminal_event["response"]["error"]["code"], "server_error")
+            }
+            "response.cancelled" => {
+                assert!(terminal_event["response"]["error"].is_null());
+                assert!(terminal_event["response"]["incomplete_details"].is_null());
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[tokio::test]
+async fn staged_error_and_drop_faults_end_without_a_response_terminal_event() {
+    for (fault, expected_last) in [("sse_error", Some("error")), ("drop", None)] {
+        let fixture = fixture(10_000);
+        let transcript = collect_sse_at(
+            fixture.app,
+            "/v1/responses",
+            json!({
+                "model": "mock-reasoner",
+                "input": "Which release should ship?",
+                "reasoning": {"effort": "high", "summary": "auto"},
+                "stream": true,
+                "x_simulate": {"fault": fault, "stage": "output"}
+            }),
+        )
+        .await;
+        let events = transcript.chunks();
+
+        assert!(!events.is_empty());
+        assert!(events.iter().all(|event| {
+            !matches!(
+                event["type"].as_str(),
+                Some(
+                    "response.completed"
+                        | "response.incomplete"
+                        | "response.failed"
+                        | "response.cancelled"
+                )
+            )
+        }));
+        if let Some(expected_last) = expected_last {
+            assert_eq!(events.last().unwrap()["type"], expected_last);
+            assert_eq!(events.last().unwrap()["code"], "server_error");
+        } else {
+            assert_ne!(events.last().unwrap()["type"], "error");
+        }
+    }
+}
+
+#[tokio::test]
+async fn refusal_events_reconstruct_the_authored_refusal() {
+    let fixture = fixture(10_000);
+    let transcript = collect_sse_at(
+        fixture.app,
+        "/v1/responses",
+        json!({
+            "model": "mock-gpt-4o",
+            "input": "Perform the disallowed deployment action.",
+            "stream": true
+        }),
+    )
+    .await;
+    let events = transcript.chunks();
+    let refusal: String = events
+        .iter()
+        .filter(|event| event["type"] == "response.refusal.delta")
+        .map(|event| event["delta"].as_str().unwrap())
+        .collect();
+
+    assert_eq!(
+        refusal,
+        "I cannot perform that action, but I can help review a safe deployment plan."
+    );
+    assert_eq!(
+        events.last().unwrap()["response"]["output"][0]["content"][0]["refusal"],
+        refusal
+    );
+    assert_eq!(events.last().unwrap()["response"]["output_text"], "");
+}
+
+#[tokio::test]
+async fn abandoning_a_responses_stream_records_cancellation() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use futures::StreamExt;
+    use tower::ServiceExt;
+
+    let fixture = fixture(2);
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/responses")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "mock-reasoner",
+                        "input": "Which release should ship?",
+                        "reasoning": {"effort": "high", "summary": "auto"},
+                        "stream": true
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let mut stream = response.into_body().into_data_stream();
+    stream.next().await.unwrap().unwrap();
+    drop(stream);
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1_500);
+    while fixture.cancels.get() == 0 && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(fixture.cancels.get(), 1);
+}
+
+#[tokio::test]
 async fn both_mount_points_return_identical_response_objects() {
     let fixture = fixture(1_000);
     let body = json!({

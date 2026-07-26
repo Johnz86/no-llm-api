@@ -21,7 +21,7 @@
   "usage": {
     "reasoning_tokens": 28
   },
-  "plan_digest": "cabaf99912f3cfb4",
+  "plan_digest": "388fe189df970f93",
   "explanation": {
     "match_kind": "exact",
     "fixture_id": "reasoning-effort",
@@ -37,7 +37,7 @@
       }
     ],
     "effective_controls": {
-      "dataset_revision": "6b6fa8adc811c6e0",
+      "dataset_revision": "c9d0613cf6be1931",
       "scenario_revision": "default-v1",
       "model_profile_revision": "builtin-v1",
       "simulation_seed": null

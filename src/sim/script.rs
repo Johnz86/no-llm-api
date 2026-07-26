@@ -12,7 +12,7 @@ use serde_json::Value;
 
 pub const SCHEMA_VERSION: u16 = 2;
 
-pub const BUILTINS: [(&str, &str); 7] = [
+pub const BUILTINS: [(&str, &str); 11] = [
     (
         "basic-text",
         include_str!("../../fixtures/v2/basic-text.yaml"),
@@ -40,6 +40,22 @@ pub const BUILTINS: [(&str, &str); 7] = [
     (
         "legacy-structured-output",
         include_str!("../../fixtures/v2/legacy-structured-output.yaml"),
+    ),
+    (
+        "response-incomplete",
+        include_str!("../../fixtures/v2/response-incomplete.yaml"),
+    ),
+    (
+        "response-failed",
+        include_str!("../../fixtures/v2/response-failed.yaml"),
+    ),
+    (
+        "response-cancelled",
+        include_str!("../../fixtures/v2/response-cancelled.yaml"),
+    ),
+    (
+        "response-refusal",
+        include_str!("../../fixtures/v2/response-refusal.yaml"),
     ),
 ];
 

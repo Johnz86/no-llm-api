@@ -77,8 +77,9 @@ streams do not use Chat Completions' `[DONE]` sentinel.
 | item | `response.output_item.done` | item complete | Completed item equals its non-streamed output item. |
 | response | `response.completed` | terminal completed | Embedded response equals the non-streamed response. |
 
-`response.incomplete`, `response.failed`, `response.cancelled`, and `error` are terminal alternatives
-whose exact payload snapshots are added with their implementation slices. Reasoning summary events
+`response.incomplete`, `response.failed`, `response.cancelled`, and `error` are terminal alternatives.
+Authored lifecycle fixtures exercise response errors, incomplete details, response/item status
+separation, staged errors, deliberate drops, and consumer cancellation. Reasoning summary events
 finish before visible output begins in the initial renderer. Later interleaving is allowed only for
 a separately authored case backed by a pinned upstream contract.
 

@@ -1,0 +1,17 @@
+schema_version: 2
+id: response-failed
+description: Authored partial output ending in a deterministic generation failure.
+tags: [text, lifecycle, failed]
+interfaces: [responses]
+match:
+  models: [mock-gpt-4o]
+  turns:
+    - role: user
+      text: Simulate a failed deployment summary.
+cases:
+  - id: generation-error
+    default_variant: partial
+    variants:
+      partial:
+        answer: Deployment validation
+    terminal: failed

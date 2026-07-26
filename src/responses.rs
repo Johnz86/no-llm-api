@@ -1,7 +1,7 @@
 //! Typed request and response vocabulary for the experimental Responses surface.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use tiktoken_rs::CoreBPE;
 
 use crate::request_types::ReasoningEffort;
@@ -157,18 +157,26 @@ pub enum ResponseStatus {
     InProgress,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponseItemStatus {
+    Completed,
+    Incomplete,
+    InProgress,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ResponseOutputItem {
     Message {
         id: String,
         role: &'static str,
-        status: ResponseStatus,
+        status: ResponseItemStatus,
         content: Vec<ResponseContentPart>,
     },
     Reasoning {
         id: String,
-        status: ResponseStatus,
+        status: ResponseItemStatus,
         summary: Vec<ResponseSummaryPart>,
         #[serde(skip_serializing_if = "Option::is_none")]
         encrypted_content: Option<String>,
@@ -242,7 +250,11 @@ pub fn render_response(
     let suffix = identity.id.trim_start_matches("chatcmpl-");
     let id = format!("resp_{suffix}");
     let status = terminal_status(plan.terminal);
-    let item_status = status;
+    let item_status = if status == ResponseStatus::Completed {
+        ResponseItemStatus::Completed
+    } else {
+        ResponseItemStatus::Incomplete
+    };
     let mut output = Vec::new();
     let mut message_parts = Vec::new();
     let mut summary_text = None;
@@ -358,8 +370,8 @@ pub fn render_response(
         output_text,
         completed_at: (status == ResponseStatus::Completed).then_some(identity.created + 1),
         status,
-        error: None,
-        incomplete_details: None,
+        error: response_error(status),
+        incomplete_details: incomplete_details(status),
         instructions: None,
         model: request.model.clone(),
         output,
@@ -393,6 +405,19 @@ fn terminal_status(status: TerminalStatus) -> ResponseStatus {
         TerminalStatus::Failed => ResponseStatus::Failed,
         TerminalStatus::Cancelled => ResponseStatus::Cancelled,
     }
+}
+
+fn response_error(status: ResponseStatus) -> Option<Value> {
+    (status == ResponseStatus::Failed).then(|| {
+        json!({
+            "code": "server_error",
+            "message": "The response failed during deterministic simulation."
+        })
+    })
+}
+
+fn incomplete_details(status: ResponseStatus) -> Option<Value> {
+    (status == ResponseStatus::Incomplete).then(|| json!({"reason": "max_output_tokens"}))
 }
 
 fn response_text_settings(config: Option<&ResponseTextConfig>) -> ResponseTextSettings {

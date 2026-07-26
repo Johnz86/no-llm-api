@@ -16,9 +16,11 @@ diagnostic headers, and stage-aware faults. The legacy matching ladder remains i
 byte-stable. The non-streamed Responses route renders text, refusals, public reasoning summaries,
 and schema-validated structured output through the locked official JavaScript client. The T4 server
 path schedules typed, contiguous, reasoning-first SSE events with deterministic pacing, faults, and
-cancellation. The locked official client reconstructs the public summary and answer from those
-events. The remaining T4 audit covers terminal and fault variants. Milestones T5 and T6 remain
-future work; Responses state, tools, and control-plane diagnostics are not implemented yet.
+cancellation. Authored fixtures cover refusal plus completed, incomplete, failed, and cancelled
+lifecycles, while endpoint tests cover staged errors, deliberate drops, and consumer cancellation.
+The locked official client reconstructs the public summary and answer from events. Its remaining T4
+audit covers structured output and refusal streams. Milestones T5 and T6 remain future work;
+Responses state, tools, and control-plane diagnostics are not implemented yet.
 
 The first future delivery stays text-first. It establishes the shared item model, deterministic
 reasoning policy, state transitions, scenario vocabulary, and validation rules that later tool,
@@ -560,8 +562,8 @@ Exit: the locked official client completes all non-streamed text-first contract 
 
 ### T4: Responses streaming
 
-Status: core server, repository harness, and official-client reasoning stream complete; terminal
-and fault matrix audit pending.
+Status: server lifecycle/fault matrix and official-client reasoning stream complete; official-client
+structured-output and refusal audit pending.
 
 - implement the pinned event state machine and schedule renderer;
 - add delta reconstruction, event snapshots, stage faults, pacing, and cancellation;
