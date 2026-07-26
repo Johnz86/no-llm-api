@@ -13,7 +13,7 @@ stack. The default binary contains no upstream HTTP client or TLS stack.
 
 ```bash
 cargo build
-cargo run
+cargo run --bin no-llm-api
 ```
 
 The binary listens on `127.0.0.1:8080` by default. On first launch it materialises

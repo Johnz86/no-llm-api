@@ -84,6 +84,17 @@ fn the_changelog_calls_out_wire_behaviour_separately() {
 }
 
 #[test]
+fn the_changelog_documents_the_current_version() {
+    let changelog = std::fs::read_to_string("CHANGELOG.md").expect("CHANGELOG.md");
+    let heading = format!("## [{}]", env!("CARGO_PKG_VERSION"));
+    assert!(
+        changelog.contains(&heading),
+        "CHANGELOG.md has no entry for {}",
+        env!("CARGO_PKG_VERSION")
+    );
+}
+
+#[test]
 fn the_readme_does_not_promise_the_removed_compat_env_flag() {
     assert!(
         !readme().contains("ASYNC_OPENAI_COMPAT"),

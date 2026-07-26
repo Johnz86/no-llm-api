@@ -10,6 +10,8 @@ configuration surface moved.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-26
+
 ### Wire behaviour
 
 - `POST /chat/completions` returns the lean `CreateChatCompletionResponse` shape. The

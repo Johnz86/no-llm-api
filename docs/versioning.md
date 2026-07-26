@@ -7,15 +7,16 @@ on the wire and the switches that shape them, so the version communicates those.
 
 | Change | Bump |
 | --- | --- |
-| The bytes a client receives change: a field appears or disappears, frame ordering changes, a status or error code changes | minor while `0.x`, major from `1.0` |
-| A flag or environment variable is removed or its default changes | minor while `0.x`, major from `1.0` |
-| A scenario's pacing or fault behaviour changes | minor |
-| A new endpoint, flag, scenario or fixture is added without altering existing output | minor |
+| The bytes a client receives change incompatibly: a field disappears, frame ordering changes, or a status or error code changes | major |
+| A flag or environment variable is removed or its default changes incompatibly | major |
+| Existing fixture selection or scenario pacing/fault behavior changes incompatibly | major |
+| A new endpoint, flag, scenario, model, or fixture is added without changing existing request behavior | minor |
 | A bug fix that makes output match the OpenAI spec more closely | patch, and always listed under **Wire behaviour** |
 | Internal refactoring, docs, tests, dependency bumps with no observable change | patch |
 
-While the version is `0.x`, the minor number carries breaking changes. That is the
-honest signal for a project whose wire shape is still converging.
+Version `1.0.0` establishes the current Chat Completions wire contract, deterministic fixture
+selection, configuration surface, and scenario behavior as the stable compatibility baseline.
+Semantic Versioning applies to every release after that baseline.
 
 ## How a consumer pins behaviour
 
