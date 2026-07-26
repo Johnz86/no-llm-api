@@ -60,3 +60,40 @@ test('official client receives validated structured output bytes', async () => {
   }
   expect(response.output_text).toBe('{"status":"green","blockers":0}');
 });
+
+test('official client reconstructs a reasoning-first Responses stream', async () => {
+  const stream = await client.responses.create({
+    model: 'mock-reasoner',
+    input: 'Which release should ship?',
+    reasoning: { effort: 'high', summary: 'auto' },
+    stream: true,
+  });
+  const eventTypes: string[] = [];
+  let summary = '';
+  let text = '';
+  let terminalOutputText: string | undefined;
+
+  for await (const event of stream) {
+    eventTypes.push(event.type);
+    if (event.type === 'response.reasoning_summary_text.delta') {
+      summary += event.delta;
+    }
+    if (event.type === 'response.output_text.delta') {
+      text += event.delta;
+    }
+    if (event.type === 'response.completed') {
+      terminalOutputText = event.response.output_text;
+    }
+  }
+
+  expect(eventTypes[0]).toBe('response.created');
+  expect(eventTypes.at(-1)).toBe('response.completed');
+  expect(eventTypes.indexOf('response.reasoning_summary_text.done')).toBeLessThan(
+    eventTypes.indexOf('response.output_text.delta'),
+  );
+  expect(summary).toBe(
+    'Compared readiness, blockers, rollback coverage, ownership, and recovery time.',
+  );
+  expect(text).toBe('Ship release B.');
+  expect(terminalOutputText).toBe(text);
+});

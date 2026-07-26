@@ -340,9 +340,10 @@ pagination for the lifetime of the process.
   `[DONE]`, finish reasons, stable chunk ids, usage-frame position, and pacing; Responses assertions
   cover contiguous event sequences, reconstruction, terminal equality, and the absent sentinel.
 - `npm --prefix e2e test` starts the server, drives the embedded page in Chromium, and exercises
-  non-streamed Responses with the locked official JavaScript client. It verifies incremental
-  rendering, exact fixture text, browser-console hygiene, API errors, reasoning summaries, and
-  structured output. Install the browser once with `npx --prefix e2e playwright install chromium`.
+  object and streamed-event Responses with the locked official JavaScript client. It verifies
+  incremental rendering, exact fixture text, browser-console hygiene, API errors, reasoning
+  summaries, event ordering, and structured output. Install the browser once with
+  `npx --prefix e2e playwright install chromium`.
 - `no-llm-api health --url http://127.0.0.1:8080/ready` is the dependency-free readiness probe
   used by the distroless image, where `curl` is unavailable.
 - `bash scripts/smoke-open-webui.sh` boots the real Compose stack, verifies that Open WebUI's model

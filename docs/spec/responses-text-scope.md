@@ -6,9 +6,10 @@ This document freezes the Responses text contract. The repository serves non-str
 typed SSE events at `POST /v1/responses`; the executable corpus in
 [`responses-text-contract/`](responses-text-contract/) defines both boundaries.
 
-The locked `openai` 6.49.0 JavaScript client exercises non-streamed reasoning summaries and strict
-structured output in `e2e/responses-client.spec.ts`. The response includes the SDK-required
-`output_text` aggregation and standard response members in addition to the frozen minimal corpus.
+The locked `openai` 6.49.0 JavaScript client exercises response objects, strict structured output,
+and reasoning-first streamed events in `e2e/responses-client.spec.ts`. The response includes the
+SDK-required `output_text` aggregation and standard response members in addition to the frozen
+minimal corpus.
 
 The contract is pinned to the OpenAI OpenAPI document at commit
 `5c044be3bf3a42854e99e34616564eeb2124a317` from 2026-07-23, full-document SHA-256
