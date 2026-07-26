@@ -1,0 +1,22 @@
+schema_version: 2
+id: response-reasoning-only
+description: Completed reasoning output with no visible message item.
+tags: [reasoning, zero-visible-output, streaming]
+interfaces: [responses]
+match:
+  models: [mock-reasoner]
+  turns:
+    - role: user
+      text: Return reasoning without visible output.
+requirements:
+  reasoning: true
+cases:
+  - id: no-visible-output
+    constraints:
+      efforts: [high]
+    default_variant: high
+    variants:
+      high:
+        reasoning_summary: Completed the hidden-only deterministic analysis.
+        reasoning_tokens: 12
+    terminal: completed

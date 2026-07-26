@@ -21,6 +21,7 @@ pub struct Directive {
     pub jitter_ms: Option<u64>,
     pub chunk_tokens: Option<u32>,
     pub burst_frames: Option<u32>,
+    pub commit_delay_ms: Option<u64>,
     pub fault: Option<String>,
     pub stage: Option<String>,
     pub status: Option<u16>,
@@ -67,6 +68,7 @@ impl Directive {
                 "jitter-ms" => directive.jitter_ms = value.trim().parse().ok(),
                 "chunk-tokens" => directive.chunk_tokens = value.trim().parse().ok(),
                 "burst-frames" => directive.burst_frames = value.trim().parse().ok(),
+                "commit-delay-ms" => directive.commit_delay_ms = value.trim().parse().ok(),
                 _ => {}
             }
         }
@@ -107,6 +109,7 @@ impl Directive {
             jitter_ms: higher.jitter_ms.or(self.jitter_ms),
             chunk_tokens: higher.chunk_tokens.or(self.chunk_tokens),
             burst_frames: higher.burst_frames.or(self.burst_frames),
+            commit_delay_ms: higher.commit_delay_ms.or(self.commit_delay_ms),
             fault: higher.fault.or(self.fault),
             stage: higher.stage.or(self.stage),
             status: higher.status.or(self.status),
@@ -190,10 +193,12 @@ mod tests {
             ("x-simulate-ttft-ms", "250"),
             ("x-simulate-tps", "7"),
             ("x-simulate-jitter-ms", "10"),
+            ("x-simulate-commit-delay-ms", "25"),
         ]);
         assert_eq!(directive.ttft_ms, Some(250));
         assert_eq!(directive.tokens_per_second, Some(7));
         assert_eq!(directive.jitter_ms, Some(10));
+        assert_eq!(directive.commit_delay_ms, Some(25));
     }
 
     #[test]

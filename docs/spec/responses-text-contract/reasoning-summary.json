@@ -3,7 +3,7 @@
   "events": [
     {
       "response": {
-        "id": "resp_9c414ca2ac05fbc5d4e65d0b",
+        "id": "resp_319ba180fa9a23be700788f1",
         "object": "response",
         "output": [],
         "status": "in_progress"
@@ -13,7 +13,7 @@
     },
     {
       "response": {
-        "id": "resp_9c414ca2ac05fbc5d4e65d0b",
+        "id": "resp_319ba180fa9a23be700788f1",
         "object": "response",
         "output": [],
         "status": "in_progress"
@@ -23,8 +23,8 @@
     },
     {
       "item": {
-        "encrypted_content": "enc_9c414ca2ac05fbc5",
-        "id": "rs_9c414ca2ac05fbc5",
+        "encrypted_content": "enc_319ba180fa9a23be",
+        "id": "rs_319ba180fa9a23be",
         "status": "in_progress",
         "summary": [],
         "type": "reasoning"
@@ -34,7 +34,7 @@
       "type": "response.output_item.added"
     },
     {
-      "item_id": "rs_9c414ca2ac05fbc5",
+      "item_id": "rs_319ba180fa9a23be",
       "output_index": 0,
       "part": {
         "text": "",
@@ -46,7 +46,7 @@
     },
     {
       "delta": "Com",
-      "item_id": "rs_9c414ca2ac05fbc5",
+      "item_id": "rs_319ba180fa9a23be",
       "output_index": 0,
       "sequence_number": 4,
       "summary_index": 0,
@@ -54,7 +54,7 @@
     },
     {
       "delta": "pared",
-      "item_id": "rs_9c414ca2ac05fbc5",
+      "item_id": "rs_319ba180fa9a23be",
       "output_index": 0,
       "sequence_number": 5,
       "summary_index": 0,
@@ -62,7 +62,7 @@
     },
     {
       "delta": " readiness",
-      "item_id": "rs_9c414ca2ac05fbc5",
+      "item_id": "rs_319ba180fa9a23be",
       "output_index": 0,
       "sequence_number": 6,
       "summary_index": 0,
@@ -70,7 +70,7 @@
     },
     {
       "delta": ",",
-      "item_id": "rs_9c414ca2ac05fbc5",
+      "item_id": "rs_319ba180fa9a23be",
       "output_index": 0,
       "sequence_number": 7,
       "summary_index": 0,
@@ -78,7 +78,7 @@
     },
     {
       "delta": " blockers",
-      "item_id": "rs_9c414ca2ac05fbc5",
+      "item_id": "rs_319ba180fa9a23be",
       "output_index": 0,
       "sequence_number": 8,
       "summary_index": 0,
@@ -86,7 +86,7 @@
     },
     {
       "delta": ",",
-      "item_id": "rs_9c414ca2ac05fbc5",
+      "item_id": "rs_319ba180fa9a23be",
       "output_index": 0,
       "sequence_number": 9,
       "summary_index": 0,
@@ -94,7 +94,7 @@
     },
     {
       "delta": " rollback",
-      "item_id": "rs_9c414ca2ac05fbc5",
+      "item_id": "rs_319ba180fa9a23be",
       "output_index": 0,
       "sequence_number": 10,
       "summary_index": 0,
@@ -102,7 +102,7 @@
     },
     {
       "delta": " coverage",
-      "item_id": "rs_9c414ca2ac05fbc5",
+      "item_id": "rs_319ba180fa9a23be",
       "output_index": 0,
       "sequence_number": 11,
       "summary_index": 0,
@@ -110,7 +110,7 @@
     },
     {
       "delta": ",",
-      "item_id": "rs_9c414ca2ac05fbc5",
+      "item_id": "rs_319ba180fa9a23be",
       "output_index": 0,
       "sequence_number": 12,
       "summary_index": 0,
@@ -118,7 +118,7 @@
     },
     {
       "delta": " ownership",
-      "item_id": "rs_9c414ca2ac05fbc5",
+      "item_id": "rs_319ba180fa9a23be",
       "output_index": 0,
       "sequence_number": 13,
       "summary_index": 0,
@@ -126,7 +126,7 @@
     },
     {
       "delta": ",",
-      "item_id": "rs_9c414ca2ac05fbc5",
+      "item_id": "rs_319ba180fa9a23be",
       "output_index": 0,
       "sequence_number": 14,
       "summary_index": 0,
@@ -134,7 +134,7 @@
     },
     {
       "delta": " and",
-      "item_id": "rs_9c414ca2ac05fbc5",
+      "item_id": "rs_319ba180fa9a23be",
       "output_index": 0,
       "sequence_number": 15,
       "summary_index": 0,
@@ -142,7 +142,7 @@
     },
     {
       "delta": " recovery",
-      "item_id": "rs_9c414ca2ac05fbc5",
+      "item_id": "rs_319ba180fa9a23be",
       "output_index": 0,
       "sequence_number": 16,
       "summary_index": 0,
@@ -150,7 +150,7 @@
     },
     {
       "delta": " time",
-      "item_id": "rs_9c414ca2ac05fbc5",
+      "item_id": "rs_319ba180fa9a23be",
       "output_index": 0,
       "sequence_number": 17,
       "summary_index": 0,
@@ -158,14 +158,14 @@
     },
     {
       "delta": ".",
-      "item_id": "rs_9c414ca2ac05fbc5",
+      "item_id": "rs_319ba180fa9a23be",
       "output_index": 0,
       "sequence_number": 18,
       "summary_index": 0,
       "type": "response.reasoning_summary_text.delta"
     },
     {
-      "item_id": "rs_9c414ca2ac05fbc5",
+      "item_id": "rs_319ba180fa9a23be",
       "output_index": 0,
       "sequence_number": 19,
       "summary_index": 0,
@@ -173,7 +173,7 @@
       "type": "response.reasoning_summary_text.done"
     },
     {
-      "item_id": "rs_9c414ca2ac05fbc5",
+      "item_id": "rs_319ba180fa9a23be",
       "output_index": 0,
       "part": {
         "text": "Compared readiness, blockers, rollback coverage, ownership, and recovery time.",
@@ -185,8 +185,8 @@
     },
     {
       "item": {
-        "encrypted_content": "enc_9c414ca2ac05fbc5",
-        "id": "rs_9c414ca2ac05fbc5",
+        "encrypted_content": "enc_319ba180fa9a23be",
+        "id": "rs_319ba180fa9a23be",
         "status": "completed",
         "summary": [
           {
@@ -203,7 +203,7 @@
     {
       "item": {
         "content": [],
-        "id": "msg_9c414ca2ac05fbc5",
+        "id": "msg_319ba180fa9a23be",
         "role": "assistant",
         "status": "in_progress",
         "type": "message"
@@ -214,7 +214,7 @@
     },
     {
       "content_index": 0,
-      "item_id": "msg_9c414ca2ac05fbc5",
+      "item_id": "msg_319ba180fa9a23be",
       "output_index": 1,
       "part": {
         "annotations": [],
@@ -228,7 +228,7 @@
     {
       "content_index": 0,
       "delta": "Ship",
-      "item_id": "msg_9c414ca2ac05fbc5",
+      "item_id": "msg_319ba180fa9a23be",
       "logprobs": [],
       "output_index": 1,
       "sequence_number": 24,
@@ -237,7 +237,7 @@
     {
       "content_index": 0,
       "delta": " release",
-      "item_id": "msg_9c414ca2ac05fbc5",
+      "item_id": "msg_319ba180fa9a23be",
       "logprobs": [],
       "output_index": 1,
       "sequence_number": 25,
@@ -246,7 +246,7 @@
     {
       "content_index": 0,
       "delta": " B",
-      "item_id": "msg_9c414ca2ac05fbc5",
+      "item_id": "msg_319ba180fa9a23be",
       "logprobs": [],
       "output_index": 1,
       "sequence_number": 26,
@@ -255,7 +255,7 @@
     {
       "content_index": 0,
       "delta": ".",
-      "item_id": "msg_9c414ca2ac05fbc5",
+      "item_id": "msg_319ba180fa9a23be",
       "logprobs": [],
       "output_index": 1,
       "sequence_number": 27,
@@ -263,7 +263,7 @@
     },
     {
       "content_index": 0,
-      "item_id": "msg_9c414ca2ac05fbc5",
+      "item_id": "msg_319ba180fa9a23be",
       "logprobs": [],
       "output_index": 1,
       "sequence_number": 28,
@@ -272,7 +272,7 @@
     },
     {
       "content_index": 0,
-      "item_id": "msg_9c414ca2ac05fbc5",
+      "item_id": "msg_319ba180fa9a23be",
       "output_index": 1,
       "part": {
         "annotations": [],
@@ -293,7 +293,7 @@
             "type": "output_text"
           }
         ],
-        "id": "msg_9c414ca2ac05fbc5",
+        "id": "msg_319ba180fa9a23be",
         "role": "assistant",
         "status": "completed",
         "type": "message"
@@ -304,11 +304,11 @@
     },
     {
       "response": {
-        "completed_at": 1752102470,
+        "completed_at": 1752649663,
         "conversation": null,
-        "created_at": 1752102469,
+        "created_at": 1752649662,
         "error": null,
-        "id": "resp_9c414ca2ac05fbc5d4e65d0b",
+        "id": "resp_319ba180fa9a23be700788f1",
         "incomplete_details": null,
         "instructions": null,
         "max_output_tokens": null,
@@ -317,8 +317,8 @@
         "object": "response",
         "output": [
           {
-            "encrypted_content": "enc_9c414ca2ac05fbc5",
-            "id": "rs_9c414ca2ac05fbc5",
+            "encrypted_content": "enc_319ba180fa9a23be",
+            "id": "rs_319ba180fa9a23be",
             "status": "completed",
             "summary": [
               {
@@ -337,7 +337,7 @@
                 "type": "output_text"
               }
             ],
-            "id": "msg_9c414ca2ac05fbc5",
+            "id": "msg_319ba180fa9a23be",
             "role": "assistant",
             "status": "completed",
             "type": "message"
@@ -388,11 +388,11 @@
     "stream": false
   },
   "response": {
-    "completed_at": 1752102470,
+    "completed_at": 1752649663,
     "conversation": null,
-    "created_at": 1752102469,
+    "created_at": 1752649662,
     "error": null,
-    "id": "resp_9c414ca2ac05fbc5d4e65d0b",
+    "id": "resp_319ba180fa9a23be700788f1",
     "incomplete_details": null,
     "instructions": null,
     "max_output_tokens": null,
@@ -401,8 +401,8 @@
     "object": "response",
     "output": [
       {
-        "encrypted_content": "enc_9c414ca2ac05fbc5",
-        "id": "rs_9c414ca2ac05fbc5",
+        "encrypted_content": "enc_319ba180fa9a23be",
+        "id": "rs_319ba180fa9a23be",
         "status": "completed",
         "summary": [
           {
@@ -421,7 +421,7 @@
             "type": "output_text"
           }
         ],
-        "id": "msg_9c414ca2ac05fbc5",
+        "id": "msg_319ba180fa9a23be",
         "role": "assistant",
         "status": "completed",
         "type": "message"

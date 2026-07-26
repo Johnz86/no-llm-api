@@ -583,7 +583,11 @@ async fn create_response(
         None
     };
     if conversation.is_some() {
-        tokio::task::yield_now().await;
+        if let Some(delay) = directive.commit_delay_ms {
+            tokio::time::sleep(Duration::from_millis(delay.min(10_000))).await;
+        } else {
+            tokio::task::yield_now().await;
+        }
     }
     let controls = state
         .semantic

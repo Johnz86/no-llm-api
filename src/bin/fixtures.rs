@@ -8,6 +8,7 @@ use no_llm_api::dataset::write_dataset;
 use no_llm_api::fixtures::{builtin_sets, load_dir};
 use no_llm_api::model::ChatCompletionRequest;
 use no_llm_api::models::ModelCatalogue;
+use no_llm_api::responses::CreateResponseRequest;
 use no_llm_api::sim::artifact::SemanticArtifact;
 use no_llm_api::sim::canonical::CanonicalRequest;
 use no_llm_api::sim::plan::{SemanticCapabilities, SemanticResponsePlan, compile, explain};
@@ -238,18 +239,27 @@ fn semantic_plan(
 ) -> Result<SemanticResponsePlan> {
     let request_text = std::fs::read_to_string(request_path)
         .with_context(|| format!("reading {}", request_path.display()))?;
-    let request: ChatCompletionRequest = serde_json::from_str(&request_text)
+    let request: serde_json::Value = serde_json::from_str(&request_text)
         .with_context(|| format!("parsing {}", request_path.display()))?;
+    let (model, canonical) = if request.get("messages").is_some() {
+        let request: ChatCompletionRequest = serde_json::from_value(request)
+            .with_context(|| format!("parsing {} as Chat Completions", request_path.display()))?;
+        (request.model.clone(), CanonicalRequest::from_chat(&request))
+    } else {
+        let request: CreateResponseRequest = serde_json::from_value(request)
+            .with_context(|| format!("parsing {} as Responses", request_path.display()))?;
+        (request.model.clone(), request.canonical_request())
+    };
     let fixtures = semantic_fixtures(input)?;
     let models = semantic_models(models)?;
     let profile = models
-        .profile(&request.model)
-        .with_context(|| format!("model '{}' is not in the catalogue", request.model))?;
+        .profile(&model)
+        .with_context(|| format!("model '{model}' is not in the catalogue"))?;
     let artifact = SemanticArtifact::compile(&fixtures, &models, &cl100k_base()?)?;
     let controls = artifact.selection_controls(case, variant);
     Ok(compile(
         &fixtures,
-        &CanonicalRequest::from_chat(&request),
+        &canonical,
         &controls,
         &SemanticCapabilities::from(profile),
     )?)

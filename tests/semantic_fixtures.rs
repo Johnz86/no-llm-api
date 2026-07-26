@@ -42,6 +42,40 @@ fn semantic_artifact_reproduces_across_fresh_processes() {
 }
 
 #[test]
+fn responses_plan_reproduces_across_fresh_processes() {
+    let directory = tempfile::tempdir().unwrap();
+    let request = directory.path().join("responses.json");
+    std::fs::write(
+        &request,
+        serde_json::to_vec(&serde_json::json!({
+            "model": "mock-reasoner",
+            "input": "Which release should ship?",
+            "reasoning": {"effort": "high", "summary": "auto"},
+            "store": false
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let run = || {
+        fixtures_binary()
+            .args(["snapshot-semantic", "--request"])
+            .arg(&request)
+            .output()
+            .unwrap()
+    };
+    let first = run();
+    let second = run();
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert_eq!(first.stdout, second.stdout);
+    let plan: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
+    assert_eq!(plan["interface"], "responses");
+}
+
+#[test]
 fn compatibility_report_command_is_machine_readable_and_clean_for_same_artifact() {
     let directory = tempfile::tempdir().unwrap();
     let artifact = directory.path().join("semantic.json");

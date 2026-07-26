@@ -281,3 +281,72 @@ test('official client manages deterministic conversation items', async () => {
     }),
   ).rejects.toMatchObject({ status: 404 });
 });
+
+test('official client receives typed schema and malformed-field errors', async () => {
+  await expect(
+    client.responses.create(
+      {
+        model: 'mock-gpt-4o',
+        input: 'Report release status.',
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'release-status',
+            schema: { type: 'object', properties: { status: { const: 'red' } } },
+          },
+        },
+      },
+      { headers: { 'X-Simulate-Case': 'structured-output/release-status' } },
+    ),
+  ).rejects.toMatchObject({ status: 400, code: 'semantic_schema_error', param: 'text.format' });
+
+  await expect(
+    client.responses.create({
+      model: 'mock-reasoner',
+      input: 'Which release should ship?',
+      reasoning: { effort: 'extreme' },
+    } as never),
+  ).rejects.toMatchObject({ status: 400 });
+});
+
+test('official client preserves incomplete failed and cancelled terminals', async () => {
+  const cases = [
+    ['Return a partial deployment summary.', 'incomplete'],
+    ['Simulate a failed deployment summary.', 'failed'],
+    ['Simulate a cancelled deployment summary.', 'cancelled'],
+  ] as const;
+  for (const [input, expected] of cases) {
+    const response = await client.responses.create({
+      model: 'mock-gpt-4o',
+      input,
+      store: false,
+    });
+    expect(response.status).toBe(expected);
+  }
+});
+
+test('official client observes deterministic conversation write conflicts', async () => {
+  const conversation = await client.conversations.create({
+    metadata: { suite: 'official-client-conversation-concurrency' },
+  });
+  const writes = await Promise.allSettled(
+    Array.from({ length: 16 }, () =>
+      client.responses.create({
+        model: 'mock-gpt-4o',
+        input: 'Introduce the simulator.',
+        conversation: conversation.id,
+      }, { headers: {
+        'X-Simulate-Case': 'basic-text/concise',
+        'X-Simulate-Commit-Delay-Ms': '100',
+      } }),
+    ),
+  );
+  const fulfilled = writes.filter(result => result.status === 'fulfilled');
+  const rejected = writes.filter(result => result.status === 'rejected');
+  expect(fulfilled.length).toBeGreaterThan(0);
+  expect(rejected.length).toBeGreaterThan(0);
+  expect(fulfilled.length + rejected.length).toBe(16);
+  for (const result of rejected) {
+    expect(result.reason).toMatchObject({ status: 409, code: 'conversation_conflict' });
+  }
+});

@@ -510,6 +510,101 @@ async fn stored_predecessor_continues_the_canonical_turn_sequence() {
 }
 
 #[tokio::test]
+async fn state_modes_select_the_same_authored_continuation() {
+    let fixture = fixture(100_000);
+    let (_, _, parent_body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": "Summarize the release in one paragraph.",
+            "store": true
+        })),
+    )
+    .await;
+    let parent: Value = serde_json::from_str(&parent_body).unwrap();
+    let correction = "Correction: use exactly five words.";
+    let (_, _, predecessor_body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": correction,
+            "previous_response_id": parent["id"],
+            "store": false
+        })),
+    )
+    .await;
+    let predecessor: Value = serde_json::from_str(&predecessor_body).unwrap();
+
+    let (_, _, replay_body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": "Summarize the release in one paragraph."
+                },
+                parent["output"][0].clone(),
+                {"type": "message", "role": "user", "content": correction}
+            ],
+            "store": false
+        })),
+    )
+    .await;
+    let replay: Value = serde_json::from_str(&replay_body).unwrap();
+
+    let (_, _, conversation_body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/conversations",
+        Some(json!({
+            "metadata": {"suite": "state-equivalence"},
+            "items": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": "Summarize the release in one paragraph."
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": "The release is ready after validation."
+                }
+            ]
+        })),
+    )
+    .await;
+    let conversation: Value = serde_json::from_str(&conversation_body).unwrap();
+    let (_, _, conversation_response_body) = send(
+        fixture.app,
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": correction,
+            "conversation": conversation["id"],
+            "store": false
+        })),
+    )
+    .await;
+    let conversation_response: Value = serde_json::from_str(&conversation_response_body).unwrap();
+
+    for response in [&predecessor, &replay, &conversation_response] {
+        assert_eq!(
+            response["output_text"],
+            "Release validated; deployment is ready."
+        );
+    }
+}
+
+#[tokio::test]
 async fn continuation_requires_an_available_stored_predecessor() {
     let fixture = fixture(10_000);
     let (status, _, text) = send(
@@ -1519,6 +1614,76 @@ async fn staged_error_and_drop_faults_end_without_a_response_terminal_event() {
 }
 
 #[tokio::test]
+async fn reasoning_output_terminal_and_reserved_tool_fault_stages_are_distinct() {
+    let cases = [
+        (
+            "reasoning",
+            json!({
+                "model": "mock-reasoner",
+                "input": "Which release should ship?",
+                "reasoning": {"effort": "high", "summary": "auto"},
+                "stream": true,
+                "store": false,
+                "x_simulate": {"fault": "sse_error", "stage": "reasoning"}
+            }),
+            "error",
+        ),
+        (
+            "output",
+            json!({
+                "model": "mock-gpt-4o",
+                "input": "Introduce the simulator.",
+                "stream": true,
+                "store": false,
+                "x_simulate": {
+                    "case": "basic-text/concise",
+                    "fault": "sse_error",
+                    "stage": "output"
+                }
+            }),
+            "error",
+        ),
+        (
+            "terminal",
+            json!({
+                "model": "mock-gpt-4o",
+                "input": "Introduce the simulator.",
+                "stream": true,
+                "store": false,
+                "x_simulate": {
+                    "case": "basic-text/concise",
+                    "fault": "sse_error",
+                    "stage": "terminal"
+                }
+            }),
+            "error",
+        ),
+        (
+            "tool-reserved",
+            json!({
+                "model": "mock-gpt-4o",
+                "input": "Introduce the simulator.",
+                "stream": true,
+                "store": false,
+                "x_simulate": {
+                    "case": "basic-text/concise",
+                    "fault": "sse_error",
+                    "stage": "tool"
+                }
+            }),
+            "response.completed",
+        ),
+    ];
+    for (name, request, expected_last) in cases {
+        let fixture = fixture(100_000);
+        let events = collect_sse_at(fixture.app, "/v1/responses", request)
+            .await
+            .chunks();
+        assert_eq!(events.last().unwrap()["type"], expected_last, "{name}");
+    }
+}
+
+#[tokio::test]
 async fn refusal_events_reconstruct_the_authored_refusal() {
     let fixture = fixture(10_000);
     let transcript = collect_sse_at(
@@ -1547,6 +1712,63 @@ async fn refusal_events_reconstruct_the_authored_refusal() {
         refusal
     );
     assert_eq!(events.last().unwrap()["response"]["output_text"], "");
+}
+
+#[tokio::test]
+async fn unicode_and_zero_visible_output_preserve_response_lifecycle() {
+    let fixture = fixture(100_000);
+    let unicode = "cafe\u{301} \u{1F680}\u{1F44D} \u{1F469}\u{200D}\u{1F4BB} \u{4F60}\u{597D}\u{4E16}\u{754C} done";
+    let request = json!({
+        "model": "mock-gpt-4o",
+        "input": "Return the Unicode boundary sample.",
+        "store": false
+    });
+    let (status, _, body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let response: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(response["output_text"], unicode);
+    let mut streamed = request;
+    streamed["stream"] = json!(true);
+    let events = collect_sse_at(fixture.app.clone(), "/v1/responses", streamed)
+        .await
+        .chunks();
+    let reconstructed: String = events
+        .iter()
+        .filter(|event| event["type"] == "response.output_text.delta")
+        .map(|event| event["delta"].as_str().unwrap())
+        .collect();
+    assert_eq!(reconstructed, unicode);
+    assert_eq!(events.last().unwrap()["response"], response);
+
+    let reasoning = collect_sse_at(
+        fixture.app,
+        "/v1/responses",
+        json!({
+            "model": "mock-reasoner",
+            "input": "Return reasoning without visible output.",
+            "reasoning": {"effort": "high", "summary": "auto"},
+            "store": false,
+            "stream": true
+        }),
+    )
+    .await
+    .chunks();
+    let terminal = reasoning.last().unwrap();
+    assert_eq!(terminal["type"], "response.completed");
+    assert_eq!(terminal["response"]["output_text"], "");
+    assert_eq!(terminal["response"]["output"].as_array().unwrap().len(), 1);
+    assert_eq!(terminal["response"]["output"][0]["type"], "reasoning");
+    assert!(
+        reasoning
+            .iter()
+            .all(|event| event["type"] != "response.output_text.delta")
+    );
 }
 
 #[tokio::test]
