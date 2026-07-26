@@ -171,30 +171,62 @@ impl ChatService {
         }
 
         let mut tokens = self.tokenizer.encode_with_special_tokens(&visible);
+        let mut refusal_tokens = refusal
+            .as_deref()
+            .map(|text| self.tokenizer.encode_with_special_tokens(text))
+            .unwrap_or_default();
+        let full_reasoning_tokens = if plan.usage.reasoning_tokens > 0 {
+            plan.usage.reasoning_tokens
+        } else {
+            reasoning_content
+                .as_deref()
+                .map(|text| self.tokenizer.encode_with_special_tokens(text).len() as u32)
+                .unwrap_or(0)
+        };
+        let mut reasoning_tokens = full_reasoning_tokens;
         let mut finish_reason = match plan.terminal {
             TerminalStatus::Completed => FinishReason::Stop,
             TerminalStatus::Incomplete | TerminalStatus::Failed | TerminalStatus::Cancelled => {
                 FinishReason::Length
             }
         };
-        if let Some(cap) = request
-            .max_completion_tokens
-            .or(request.max_tokens)
-            .map(|value| value as usize)
-            .filter(|cap| *cap < tokens.len())
+        if let Some(cap) = request.max_completion_tokens.or(request.max_tokens)
+            && cap < full_reasoning_tokens + tokens.len() as u32 + refusal_tokens.len() as u32
         {
-            tokens.truncate(cap);
-            if let Ok(decoded) = self.tokenizer.decode(&tokens) {
-                visible = decoded;
+            reasoning_tokens = full_reasoning_tokens.min(cap);
+            reasoning_content = truncate_reasoning(
+                reasoning_content.as_deref(),
+                reasoning_tokens,
+                full_reasoning_tokens,
+                &self.tokenizer,
+            );
+            let mut remaining = cap.saturating_sub(reasoning_tokens) as usize;
+            if remaining < tokens.len() {
+                tokens.truncate(remaining);
+                visible = self
+                    .tokenizer
+                    .decode(&tokens)
+                    .expect("tokens produced by the configured tokenizer decode");
+                refusal = None;
+                refusal_tokens.clear();
+            } else {
+                remaining -= tokens.len();
+                if remaining < refusal_tokens.len() {
+                    refusal_tokens.truncate(remaining);
+                    refusal = Some(
+                        self.tokenizer
+                            .decode(&refusal_tokens)
+                            .expect("tokens produced by the configured tokenizer decode"),
+                    );
+                }
             }
             finish_reason = FinishReason::Length;
         }
 
         let prompt_tokens = count_prompt_tokens(&request.messages, &self.tokenizer);
         let requested = request.n.unwrap_or(1).max(1) as usize;
-        let visible_tokens = tokens.len() as u32;
-        let reasoning_tokens = plan.usage.reasoning_tokens;
-        let completion_tokens = (visible_tokens + reasoning_tokens) * requested as u32;
+        let output_tokens = tokens.len() as u32 + refusal_tokens.len() as u32;
+        let completion_tokens = (output_tokens + reasoning_tokens) * requested as u32;
         let usage = ChatCompletionUsage {
             prompt_tokens,
             completion_tokens,
@@ -585,6 +617,29 @@ impl ChatService {
     ) -> Option<Vec<StoredMessage>> {
         self.store.messages(id, order, after, limit).await
     }
+}
+
+fn truncate_reasoning(
+    reasoning: Option<&str>,
+    used_tokens: u32,
+    full_tokens: u32,
+    tokenizer: &CoreBPE,
+) -> Option<String> {
+    let reasoning = reasoning?;
+    if used_tokens == 0 {
+        return None;
+    }
+    if used_tokens >= full_tokens || full_tokens == 0 {
+        return Some(reasoning.to_string());
+    }
+    let mut tokens = tokenizer.encode_with_special_tokens(reasoning);
+    let proportional =
+        ((tokens.len() as u64 * u64::from(used_tokens)).div_ceil(u64::from(full_tokens))) as usize;
+    tokens.truncate(proportional.max(1));
+    tokenizer
+        .decode(&tokens)
+        .ok()
+        .filter(|text| !text.is_empty())
 }
 
 fn build_stored_messages(

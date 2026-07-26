@@ -304,3 +304,80 @@ async fn stage_fault_can_fire_before_the_terminal_chunk() {
     );
     assert_eq!(transcript.frames.last().unwrap().data, "[DONE]");
 }
+
+#[tokio::test]
+async fn completion_cap_is_spent_on_reasoning_before_visible_output() {
+    let fixture = fixture(1_000);
+    for (cap, full_reasoning, has_output) in [(4, false, false), (8, true, false), (9, true, true)]
+    {
+        let mut body = message("mock-reasoner", "Which release should ship?");
+        body["reasoning_effort"] = json!("low");
+        body["max_completion_tokens"] = json!(cap);
+        body["x_simulate"] = json!({"case": "reasoning-effort/release-decision"});
+        let (status, _, text) = send(
+            fixture.app.clone(),
+            "POST",
+            "/v1/chat/completions",
+            Some(body),
+        )
+        .await;
+
+        assert_eq!(status, 200);
+        let response: Value = serde_json::from_str(&text).unwrap();
+        let choice = &response["choices"][0];
+        let reasoning = choice["message"]["reasoning_content"].as_str().unwrap();
+        assert_eq!(
+            reasoning == "Checked readiness and blockers.",
+            full_reasoning
+        );
+        assert_eq!(choice["message"]["content"].is_string(), has_output);
+        assert_eq!(choice["finish_reason"], "length");
+        assert_eq!(response["usage"]["completion_tokens"], cap);
+        assert_eq!(
+            response["usage"]["completion_tokens_details"]["reasoning_tokens"],
+            cap.min(8)
+        );
+    }
+}
+
+#[tokio::test]
+async fn capped_stream_reconstructs_the_capped_completion_and_usage() {
+    let fixture = fixture(1_000);
+    let mut body = message("mock-reasoner", "Which release should ship?");
+    body["reasoning_effort"] = json!("low");
+    body["max_completion_tokens"] = json!(9);
+    body["x_simulate"] = json!({"case": "reasoning-effort/release-decision"});
+    let (status, _, text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/chat/completions",
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let completion: Value = serde_json::from_str(&text).unwrap();
+
+    body["stream"] = json!(true);
+    body["stream_options"] = json!({"include_usage": true});
+    let transcript = collect_sse(fixture.app, body).await;
+
+    transcript.assert_well_formed();
+    assert_eq!(
+        transcript.content(),
+        completion["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap()
+    );
+    assert_eq!(
+        streamed_reasoning(&transcript),
+        completion["choices"][0]["message"]["reasoning_content"]
+            .as_str()
+            .unwrap()
+    );
+    let chunks = transcript.chunks();
+    let streamed_usage = &chunks
+        .iter()
+        .find(|chunk| chunk.get("usage").is_some_and(|usage| !usage.is_null()))
+        .unwrap()["usage"];
+    assert_eq!(streamed_usage, &completion["usage"]);
+}
