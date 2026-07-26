@@ -16,7 +16,9 @@ use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer, Expos
 use uuid::Uuid;
 
 use crate::config::{AuthSettings, ControlPlaneSettings, CorsSettings};
-use crate::conversations::{ConversationStore, CreateConversationRequest};
+use crate::conversations::{
+    ConversationStore, CreateConversationItemsRequest, CreateConversationRequest,
+};
 use crate::http::auth;
 use crate::http::control::{self, RequestLog};
 use crate::http::error::{ApiError, not_found_fallback};
@@ -154,6 +156,14 @@ pub fn build_router_with_options(
         .route(
             "/conversations/{conversation_id}",
             get(get_conversation).delete(delete_conversation),
+        )
+        .route(
+            "/conversations/{conversation_id}/items",
+            get(list_conversation_items).post(create_conversation_items),
+        )
+        .route(
+            "/conversations/{conversation_id}/items/{item_id}",
+            get(get_conversation_item).delete(delete_conversation_item),
         )
         .route("/models", get(list_models))
         .route("/models/{model_id}", get(get_model))
@@ -552,7 +562,7 @@ async fn create_response(
         canonical.turns.splice(0..0, snapshot.turns.clone());
         canonical.context = Some(serde_json::json!({
             "conversation": snapshot.resource,
-            "response_ids": snapshot.response_ids,
+            "item_ids": snapshot.item_ids,
         }));
         Some(snapshot)
     } else {
@@ -607,15 +617,14 @@ async fn create_response(
         state.responses.save(response.clone(), turns).await;
     }
     if let Some(conversation) = conversation {
-        let mut exchange = request.canonical_turns();
-        exchange.push(response_turn(&response));
         state
             .conversations
-            .append(
+            .append_response(
                 &conversation.resource.id,
-                response.id.clone(),
-                exchange,
-                response.usage.output_tokens_details.reasoning_tokens,
+                conversation.next_generation,
+                &request,
+                &response,
+                response_turn(&response),
             )
             .await;
     }
@@ -678,12 +687,68 @@ async fn create_conversation(
         .with_param("items")
         .with_code("invalid_value"));
     }
-    let turns = request
-        .items
-        .iter()
-        .map(crate::responses::canonical_input_item)
-        .collect();
-    Ok(Json(state.conversations.create(&request, turns).await).into_response())
+    Ok(Json(state.conversations.create(&request).await).into_response())
+}
+
+async fn create_conversation_items(
+    State(state): State<AppState>,
+    Path(conversation_id): Path<String>,
+    body: Result<Json<CreateConversationItemsRequest>, axum::extract::rejection::JsonRejection>,
+) -> Result<Response, ApiError> {
+    let Json(request) = body?;
+    if request.items.is_empty() || request.items.len() > 20 {
+        return Err(ApiError::invalid_request(
+            "Invalid value for 'items': expected between 1 and 20 items.",
+        )
+        .with_param("items")
+        .with_code("invalid_value"));
+    }
+    state
+        .conversations
+        .add_items(&conversation_id, &request)
+        .await
+        .map(|items| Json(items).into_response())
+        .ok_or_else(|| ApiError::not_found(&conversation_id))
+}
+
+async fn list_conversation_items(
+    State(state): State<AppState>,
+    Path(conversation_id): Path<String>,
+    query: Result<Query<ListQuery>, axum::extract::rejection::QueryRejection>,
+) -> Result<Response, ApiError> {
+    let Query(query) = query?;
+    let limit = query.limit.unwrap_or(20).clamp(1, 100);
+    let order = parse_order(query.order.as_deref().or(Some("desc")))?;
+    state
+        .conversations
+        .list_items(&conversation_id, order, query.after.as_deref(), limit)
+        .await
+        .map(|items| Json(items).into_response())
+        .ok_or_else(|| ApiError::not_found(&conversation_id))
+}
+
+async fn get_conversation_item(
+    State(state): State<AppState>,
+    Path((conversation_id, item_id)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    state
+        .conversations
+        .get_item(&conversation_id, &item_id)
+        .await
+        .map(|item| Json(item).into_response())
+        .ok_or_else(|| ApiError::not_found(&item_id))
+}
+
+async fn delete_conversation_item(
+    State(state): State<AppState>,
+    Path((conversation_id, item_id)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    state
+        .conversations
+        .delete_item(&conversation_id, &item_id)
+        .await
+        .map(|conversation| Json(conversation).into_response())
+        .ok_or_else(|| ApiError::not_found(&item_id))
 }
 
 async fn get_conversation(

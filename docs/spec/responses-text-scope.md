@@ -114,8 +114,11 @@ and the parsed value separately so byte reconstruction and semantic validation r
   `POST /_mock/reset` clears this process-local state together with the request log.
 - Conversation resources use deterministic content-derived `conv_` identities. A Response can
   reference the resource by string or `{id}`; its existing turns are prepended during planning and
-  the completed input/output exchange is appended under the deterministic response id. Exchanges
-  are ordered by id rather than arrival time, so concurrent appends cannot perturb later context.
+  the completed input/reasoning/output items are appended as one deterministic group. The item
+  collection supports typed batches of 1–20 messages, retrieval, deletion, `asc`/`desc` ordering,
+  `after` cursors, and bounded pagination. Identical batch retries reuse item identities without
+  duplication, deleted semantic items leave future planning context, and concurrent response groups
+  are ordered by identity rather than arrival time.
 - `previous_response_id` requires an available immutable stored predecessor. The predecessor's
   canonical turns are prepended for semantic matching and its complete public object participates
   in child plan identity, so branches require no counters or request ordering. Missing and deleted

@@ -554,6 +554,280 @@ async fn initial_conversation_items_seed_semantic_history() {
 }
 
 #[tokio::test]
+async fn conversation_items_support_deterministic_crud_and_pagination() {
+    let fixture = fixture(10_000);
+    let (_, _, text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/conversations",
+        Some(json!({
+            "items": [
+                {"type": "message", "role": "user", "content": "First"},
+                {"type": "message", "role": "assistant", "content": "Second"}
+            ]
+        })),
+    )
+    .await;
+    let conversation: Value = serde_json::from_str(&text).unwrap();
+    let conversation_id = conversation["id"].as_str().unwrap();
+    let items_path = format!("/v1/conversations/{conversation_id}/items");
+
+    let (status, _, text) = send(
+        fixture.app.clone(),
+        "GET",
+        &format!("{items_path}?order=asc"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    let ascending: Value = serde_json::from_str(&text).unwrap();
+    let initial = ascending["data"].as_array().unwrap();
+    assert_eq!(initial.len(), 2);
+    assert_eq!(initial[0]["content"][0]["text"], "First");
+    assert_eq!(initial[1]["content"][0]["text"], "Second");
+    assert_eq!(ascending["first_id"], initial[0]["id"]);
+    assert_eq!(ascending["last_id"], initial[1]["id"]);
+    assert_eq!(ascending["has_more"], false);
+
+    let (_, _, text) = send(
+        fixture.app.clone(),
+        "GET",
+        &format!("{items_path}?limit=1"),
+        None,
+    )
+    .await;
+    let first_page: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(first_page["data"][0]["id"], initial[1]["id"]);
+    assert_eq!(first_page["has_more"], true);
+    let cursor = first_page["last_id"].as_str().unwrap();
+
+    let (_, _, text) = send(
+        fixture.app.clone(),
+        "GET",
+        &format!("{items_path}?limit=1&after={cursor}"),
+        None,
+    )
+    .await;
+    let second_page: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(second_page["data"][0]["id"], initial[0]["id"]);
+    assert_eq!(second_page["has_more"], false);
+
+    let added_request = json!({
+        "items": [{"type": "message", "role": "user", "content": "Third"}]
+    });
+    let (_, _, first_add) = send(
+        fixture.app.clone(),
+        "POST",
+        &items_path,
+        Some(added_request.clone()),
+    )
+    .await;
+    let (_, _, retry_add) = send(
+        fixture.app.clone(),
+        "POST",
+        &items_path,
+        Some(added_request),
+    )
+    .await;
+    assert_eq!(retry_add, first_add);
+    let added: Value = serde_json::from_str(&first_add).unwrap();
+    let added_id = added["data"][0]["id"].as_str().unwrap();
+
+    let (status, _, retrieved) = send(
+        fixture.app.clone(),
+        "GET",
+        &format!("{items_path}/{added_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        serde_json::from_str::<Value>(&retrieved).unwrap(),
+        added["data"][0]
+    );
+
+    let (_, _, text) = send(
+        fixture.app.clone(),
+        "GET",
+        &format!("{items_path}?order=asc"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        serde_json::from_str::<Value>(&text).unwrap()["data"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+
+    let (status, _, deleted) = send(
+        fixture.app.clone(),
+        "DELETE",
+        &format!("{items_path}/{added_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        serde_json::from_str::<Value>(&deleted).unwrap(),
+        conversation
+    );
+    let (status, _, _) = send(
+        fixture.app,
+        "GET",
+        &format!("{items_path}/{added_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 404);
+}
+
+#[tokio::test]
+async fn responses_append_typed_conversation_items_and_deleted_turns_leave_context() {
+    let fixture = fixture(10_000);
+    let (_, _, text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/conversations",
+        Some(json!({
+            "items": [
+                {"type": "message", "role": "user", "content": "Summarize the release in one paragraph."},
+                {"type": "message", "role": "assistant", "content": "The release is ready after validation."}
+            ]
+        })),
+    )
+    .await;
+    let conversation: Value = serde_json::from_str(&text).unwrap();
+    let conversation_id = conversation["id"].as_str().unwrap();
+    let items_path = format!("/v1/conversations/{conversation_id}/items");
+
+    let (_, _, text) = send(
+        fixture.app.clone(),
+        "GET",
+        &format!("{items_path}?order=asc"),
+        None,
+    )
+    .await;
+    let initial: Value = serde_json::from_str(&text).unwrap();
+    let assistant_id = initial["data"][1]["id"].as_str().unwrap();
+    let (status, _, _) = send(
+        fixture.app.clone(),
+        "DELETE",
+        &format!("{items_path}/{assistant_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    let (status, headers, _) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": "Correction: use exactly five words.",
+            "conversation": conversation_id
+        })),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_ne!(headers["x-simulate-match"], "exact");
+
+    let (_, _, text) = send(fixture.app, "GET", &format!("{items_path}?order=asc"), None).await;
+    let items: Value = serde_json::from_str(&text).unwrap();
+    let data = items["data"].as_array().unwrap();
+    assert_eq!(data.len(), 3);
+    assert_eq!(data[1]["type"], "message");
+    assert_eq!(data[1]["role"], "user");
+    assert_eq!(data[2]["type"], "message");
+    assert_eq!(data[2]["role"], "assistant");
+}
+
+#[tokio::test]
+async fn conversation_item_batches_enforce_the_supported_size() {
+    for items in [
+        json!([]),
+        json!(vec![
+            json!({
+                "type": "message",
+                "role": "user",
+                "content": "overflow"
+            });
+            21
+        ]),
+    ] {
+        let fixture = fixture(10_000);
+        let (_, _, text) = send(
+            fixture.app.clone(),
+            "POST",
+            "/v1/conversations",
+            Some(json!({})),
+        )
+        .await;
+        let conversation: Value = serde_json::from_str(&text).unwrap();
+        let (status, _, text) = send(
+            fixture.app,
+            "POST",
+            &format!(
+                "/v1/conversations/{}/items",
+                conversation["id"].as_str().unwrap()
+            ),
+            Some(json!({"items": items})),
+        )
+        .await;
+        assert_eq!(status, 400);
+        let error = assert_error_envelope(&text);
+        assert_eq!(error["error"]["param"], "items");
+        assert_eq!(error["error"]["code"], "invalid_value");
+    }
+}
+
+#[tokio::test]
+async fn reasoning_responses_append_input_reasoning_and_output_items() {
+    let fixture = fixture(10_000);
+    let (_, _, text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/conversations",
+        Some(json!({})),
+    )
+    .await;
+    let conversation: Value = serde_json::from_str(&text).unwrap();
+    let conversation_id = conversation["id"].as_str().unwrap();
+
+    let (status, _, _) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-reasoner",
+            "input": "Which release should ship?",
+            "reasoning": {"effort": "high", "summary": "auto"},
+            "conversation": conversation_id
+        })),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    let (_, _, text) = send(
+        fixture.app,
+        "GET",
+        &format!("/v1/conversations/{conversation_id}/items?order=asc"),
+        None,
+    )
+    .await;
+    let items: Value = serde_json::from_str(&text).unwrap();
+    let data = items["data"].as_array().unwrap();
+    assert_eq!(data.len(), 3);
+    assert_eq!(data[0]["type"], "message");
+    assert_eq!(data[0]["role"], "user");
+    assert_eq!(data[1]["type"], "reasoning");
+    assert_eq!(data[2]["type"], "message");
+    assert_eq!(data[2]["role"], "assistant");
+}
+
+#[tokio::test]
 async fn output_budget_is_spent_on_reasoning_before_visible_text() {
     for (limit, expected_reasoning, expect_text) in
         [(16, 16, false), (28, 28, false), (30, 28, true)]

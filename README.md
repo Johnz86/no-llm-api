@@ -316,6 +316,8 @@ The server mirrors the primary Chat Completions endpoints, exposed both at the r
 - `GET` and `DELETE /responses/{response_id}`
 - `POST /conversations`
 - `GET` and `DELETE /conversations/{conversation_id}`
+- `GET` and `POST /conversations/{conversation_id}/items`
+- `GET` and `DELETE /conversations/{conversation_id}/items/{item_id}`
 - `GET /health` and `GET /ready` (unversioned)
 
 `GET /` is also unversioned and serves the bundled test page. The page is embedded in the binary, so
@@ -337,6 +339,12 @@ origin and the requested headers, so SDK-specific headers never need an allow-li
 Only completions created with `"store": true` enter the in-memory completion store. Stored records
 support retrieval, metadata replacement, deletion, filtering, cursor pagination, and message
 pagination for the lifetime of the process.
+
+Conversation resources own an ordered process-local item log. Initial items and item batches use
+content-derived identities, identical batch retries are idempotent, and Responses automatically
+append their input, reasoning, and output items. Item listing supports `asc`/`desc` ordering,
+`after` cursors, and bounded pagination; deleting an item also removes its semantic turn from future
+Response planning.
 
 ## Testing
 

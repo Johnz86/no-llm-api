@@ -580,7 +580,8 @@ Exit: streamed and non-streamed semantic objects are equivalent for the full sce
 Status: immutable process-local response storage, retrieval, deletion, and deterministic predecessor
 continuation complete. Redacted diagnostics and reset semantics are complete; conversation logs,
 resource lifecycle, deterministic exchange ordering, and automatic turn appends are complete.
-Conversation item routes and explicit expiry remain pending.
+Conversation item creation, listing, retrieval, deletion, pagination, and deterministic retry
+semantics are complete. Explicit expiry remains pending.
 
 - add response store, `previous_response_id`, conversation logs, replayed items, reset/deletion,
   deterministic expiry scenarios, branching, and concurrency semantics;
