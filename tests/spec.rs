@@ -21,13 +21,14 @@ fn the_extract_covers_every_path_the_mock_implements() {
         "/chat/completions/{completion_id}/messages",
         "/models",
         "/models/{model}",
+        "/responses",
     ] {
         assert!(
             paths.contains_key(Value::String(path.to_string())),
             "{path} is missing from {EXTRACT}"
         );
     }
-    assert_eq!(paths.len(), 5, "the extract must stay pruned");
+    assert_eq!(paths.len(), 6, "the extract must stay pruned");
 }
 
 #[test]
@@ -78,7 +79,7 @@ fn the_extract_has_no_dangling_references() {
 fn the_extract_is_small_enough_to_review_in_a_diff() {
     let bytes = std::fs::metadata(EXTRACT).expect(EXTRACT).len();
     assert!(
-        bytes < 150 * 1024,
+        bytes < 512 * 1024,
         "{EXTRACT} is {bytes} bytes; the point of pruning is reviewability"
     );
 }

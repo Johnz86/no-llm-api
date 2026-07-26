@@ -2,10 +2,10 @@
 
 ## Status
 
-This document freezes the first implementation slice for a future Responses API surface. The
-repository does not yet serve `POST /v1/responses`; the executable corpus in
-[`responses-text-contract/`](responses-text-contract/) defines the wire target that production
-models and renderers implement next.
+This document freezes the Responses text contract. The repository serves the non-streamed subset at
+`POST /v1/responses`; the executable corpus in
+[`responses-text-contract/`](responses-text-contract/) defines both that object boundary and the
+streaming target implemented in the next milestone.
 
 The contract is pinned to the OpenAI OpenAPI document at commit
 `5c044be3bf3a42854e99e34616564eeb2124a317` from 2026-07-23, full-document SHA-256

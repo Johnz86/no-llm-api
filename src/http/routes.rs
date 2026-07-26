@@ -23,6 +23,7 @@ use crate::http::metrics::Metrics;
 use crate::model::{ChatCompletionList, ChatCompletionMessageList, ChatCompletionRequest};
 use crate::models::ModelCatalogue;
 use crate::request_types::ResponseFormat;
+use crate::responses::{CreateResponseRequest, ResponseInput, ResponseTextFormat, render_response};
 use crate::service::ChatService;
 use crate::service::SemanticDiagnostics;
 use crate::sim::artifact::{SemanticArtifact, builtin_artifact};
@@ -135,6 +136,7 @@ pub fn build_router_with_options(
             "/chat/completions/{completion_id}/messages",
             get(get_chat_completion_messages),
         )
+        .route("/responses", post(create_response))
         .route("/models", get(list_models))
         .route("/models/{model_id}", get(get_model))
         .with_state(state.clone());
@@ -478,6 +480,158 @@ async fn create_chat_completion(
     response_headers.insert(&SIMULATE_MATCH, match_kind);
     insert_semantic_headers(response_headers, semantic.as_ref());
     Ok(response)
+}
+
+async fn create_response(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    body: Result<Json<CreateResponseRequest>, axum::extract::rejection::JsonRejection>,
+) -> Result<Response, ApiError> {
+    let Json(request) = body?;
+    validate_response_request(&request)?;
+    let directive = Directive::from_headers(
+        headers
+            .iter()
+            .filter_map(|(name, value)| value.to_str().ok().map(|value| (name.as_str(), value))),
+    )
+    .merge(
+        request
+            .x_simulate
+            .as_ref()
+            .map(Directive::from_value)
+            .unwrap_or_default(),
+    );
+    let profile = state
+        .models
+        .profile(&request.model)
+        .ok_or_else(|| ApiError::model_not_found(&request.model))?;
+    let controls = state
+        .semantic
+        .selection_controls(directive.case.clone(), directive.variant.clone());
+    let plan = crate::sim::plan::compile(
+        &state.semantic.fixtures,
+        &request.canonical_request(),
+        &controls,
+        &SemanticCapabilities::from(profile),
+    )
+    .map_err(semantic_plan_error)?;
+    validate_response_schema(&request, &plan)?;
+    let response = render_response(&request, &plan, state.service.tokenizer().as_ref());
+    let scenario = state.scenario.load_full();
+    let (_, fault) = directive.apply(&scenario);
+    let plan_seed = state.seed ^ plan_seed_of(&response.id);
+    if fault.kind == FaultKind::HttpError && fault_fires(&fault, plan_seed) {
+        state.metrics.record_fault();
+        return Err(http_fault_error(&fault));
+    }
+    state.metrics.record_completion(false);
+
+    let diagnostics = SemanticDiagnostics {
+        dataset_revision: plan.explanation.effective_controls.dataset_revision.clone(),
+        case_id: plan.case_id,
+        variant_id: plan.variant_id,
+        plan_digest: plan.plan_digest,
+    };
+    let mut wire = Json(response).into_response();
+    wire.headers_mut().insert(
+        &SIMULATE_MATCH,
+        HeaderValue::from_static(match plan.explanation.match_kind {
+            crate::sim::plan::SemanticMatchKind::Explicit => "explicit",
+            crate::sim::plan::SemanticMatchKind::Exact => "exact",
+            crate::sim::plan::SemanticMatchKind::DigestFallback => "digest_fallback",
+        }),
+    );
+    insert_semantic_headers(wire.headers_mut(), Some(&diagnostics));
+    Ok(wire)
+}
+
+fn validate_response_request(request: &CreateResponseRequest) -> Result<(), ApiError> {
+    if matches!(&request.input, ResponseInput::Text(text) if text.is_empty())
+        || matches!(&request.input, ResponseInput::Items(items) if items.is_empty())
+    {
+        return Err(ApiError::invalid_request(
+            "Invalid value for 'input': expected non-empty input.",
+        )
+        .with_param("input"));
+    }
+    if request.stream {
+        return Err(ApiError::invalid_request(
+            "Responses streaming is not implemented in this release.",
+        )
+        .with_param("stream")
+        .with_code("unsupported_parameter"));
+    }
+    if request.store {
+        return Err(ApiError::invalid_request(
+            "Responses persistence is not implemented in this release.",
+        )
+        .with_param("store")
+        .with_code("unsupported_parameter"));
+    }
+    if request.previous_response_id.is_some() {
+        return Err(ApiError::invalid_request(
+            "Responses continuation is not implemented in this release.",
+        )
+        .with_param("previous_response_id")
+        .with_code("unsupported_parameter"));
+    }
+    if !request.tools.is_empty() {
+        return Err(ApiError::invalid_request(
+            "Responses tools are not implemented in this release.",
+        )
+        .with_param("tools")
+        .with_code("unsupported_parameter"));
+    }
+    if request.max_output_tokens.is_some() {
+        return Err(ApiError::invalid_request(
+            "Responses output limits are not implemented in this release.",
+        )
+        .with_param("max_output_tokens")
+        .with_code("unsupported_parameter"));
+    }
+    Ok(())
+}
+
+fn validate_response_schema(
+    request: &CreateResponseRequest,
+    plan: &SemanticResponsePlan,
+) -> Result<(), ApiError> {
+    let structured = plan.output.iter().find_map(|output| match output {
+        SemanticOutput::Structured { value, .. } => Some(value),
+        _ => None,
+    });
+    match request.text.as_ref().map(|text| &text.format) {
+        Some(ResponseTextFormat::JsonSchema { schema, .. }) => {
+            let value = structured.ok_or_else(|| {
+                response_schema_error(
+                    "The selected semantic variant does not contain structured output.",
+                )
+            })?;
+            let validator = jsonschema::validator_for(schema).map_err(|_| {
+                response_schema_error("Invalid text.format: JSON Schema cannot compile.")
+            })?;
+            if validator.validate(value).is_err() {
+                return Err(response_schema_error(
+                    "The selected semantic output does not satisfy text.format.schema.",
+                ));
+            }
+        }
+        Some(ResponseTextFormat::JsonObject) => {
+            if !structured.is_some_and(serde_json::Value::is_object) {
+                return Err(response_schema_error(
+                    "The selected semantic variant does not contain a JSON object.",
+                ));
+            }
+        }
+        Some(ResponseTextFormat::Text) | None => {}
+    }
+    Ok(())
+}
+
+fn response_schema_error(message: &str) -> ApiError {
+    ApiError::invalid_request(message)
+        .with_param("text.format")
+        .with_code("semantic_schema_error")
 }
 
 fn insert_semantic_headers(

@@ -1,9 +1,9 @@
 # Semantic fixtures
 
 Schema-v2 semantic fixtures author text, reasoning, and structured outcomes independently from the
-legacy Chat parquet dataset. Explicit per-request selectors render these plans through the existing
-Chat completion and SSE transports. Requests without a selector continue to use the legacy parquet
-matching ladder.
+legacy Chat parquet dataset. Explicit per-request selectors render these plans through the Chat
+completion/SSE transports and the non-streamed Responses endpoint. Chat requests without a selector
+continue to use the legacy parquet matching ladder; Responses requests use semantic matching.
 
 Validate the built-in documents with:
 

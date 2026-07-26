@@ -375,7 +375,9 @@ fn case_matches(case: &SemanticCase, request: &CanonicalRequest) -> bool {
 fn response_format_name(request: &CanonicalRequest) -> Option<&str> {
     let format = request.response_format.as_ref()?;
     if format["type"] == "json_schema" {
-        format["json_schema"]["name"].as_str()
+        format["json_schema"]["name"]
+            .as_str()
+            .or_else(|| format["name"].as_str())
     } else {
         format["type"].as_str()
     }

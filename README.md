@@ -1,9 +1,9 @@
 # No LLM API
 
-`no-llm-api` is a deterministic, offline test double for the OpenAI Chat Completions API. It gives
-chat applications realistic HTTP responses and paced SSE streams without loading a model, making a
-network call, or consuming API credit. Responses come from versioned conversation fixtures and are
-stable across processes, machines, and concurrent requests.
+`no-llm-api` is a deterministic, offline test double for OpenAI Chat Completions and the text-first
+Responses API. It gives applications realistic HTTP responses and paced Chat SSE streams without
+loading a model, making a network call, or consuming API credit. Outputs come from versioned
+fixtures and are stable across processes, machines, and concurrent requests.
 
 The repository includes the reusable Rust library, the server CLI, fixture authoring tools, an
 opt-in live recorder, a browser test page, container packaging, and an Open WebUI compatibility
@@ -26,6 +26,18 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 ```
 
 Add `"stream":true` and use `curl -N` to observe the paced SSE transcript.
+
+The experimental non-streamed Responses surface uses the same semantic fixtures:
+
+```bash
+curl http://127.0.0.1:8080/v1/responses \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"mock-reasoner","input":"Which release should ship?","reasoning":{"effort":"high","summary":"auto"}}'
+```
+
+It supports text, public reasoning summaries, refusals, and validated structured output. Responses
+streaming, persistence, continuation, output limits, and tools return explicit unsupported-parameter
+errors until their dedicated implementation slices land.
 
 ## Request behaviour
 
