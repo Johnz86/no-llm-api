@@ -1,6 +1,8 @@
+pub mod canonical;
 pub mod digest;
 pub mod directive;
 pub mod identity;
+pub mod plan;
 pub mod scenario;
 pub mod script;
 pub mod select;

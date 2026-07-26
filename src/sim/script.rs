@@ -124,7 +124,13 @@ pub struct OutcomeVariant {
     #[serde(default)]
     pub refusal: Option<String>,
     #[serde(default)]
-    pub structured_output: Option<Value>,
+    pub structured_output: Option<StructuredOutput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuredOutput {
+    pub json: String,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -464,6 +470,14 @@ fn lint_variant(
         return fixture.fail(
             path,
             "answer, refusal, and structured_output are mutually exclusive",
+        );
+    }
+    if let Some(structured) = &variant.structured_output
+        && serde_json::from_str::<Value>(&structured.json).is_err()
+    {
+        return fixture.fail(
+            format!("{path}.structured_output.json"),
+            "must contain valid JSON bytes",
         );
     }
     Ok(())

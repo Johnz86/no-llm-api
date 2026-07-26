@@ -19,6 +19,5 @@ cases:
     variants:
       valid:
         structured_output:
-          status: green
-          blockers: 0
+          json: '{"status":"green","blockers":0}'
     terminal: completed
