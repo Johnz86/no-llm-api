@@ -180,3 +180,22 @@ test('official client retrieves and deletes an immutable stored response', async
   expect(deleted).toEqual({ id: created.id, object: 'response', deleted: true });
   await expect(client.responses.retrieve(created.id)).rejects.toMatchObject({ status: 404 });
 });
+
+test('official client continues from a stored predecessor', async () => {
+  const parent = await client.responses.create({
+    model: 'mock-gpt-4o',
+    input: 'Summarize the release in one paragraph.',
+    store: true,
+  });
+  const child = await client.responses.create({
+    model: 'mock-gpt-4o',
+    input: 'Correction: use exactly five words.',
+    previous_response_id: parent.id,
+    store: true,
+  });
+
+  expect(child.previous_response_id).toBe(parent.id);
+  expect(child.output_text).toBe('Release validated; deployment is ready.');
+  expect(child.usage?.input_tokens).toBeGreaterThan(parent.usage?.total_tokens ?? 0);
+  await expect(client.responses.retrieve(child.id)).resolves.toEqual(child);
+});

@@ -10,7 +10,7 @@ The locked `openai` 6.49.0 JavaScript client exercises response objects and text
 strict structured-output, and refusal streams in `e2e/responses-client.spec.ts`. The response
 includes the SDK-required `output_text` aggregation and standard response members in addition to
 the frozen minimal corpus. The same client verifies immutable stored-response retrieval, deletion,
-and the common not-found error path.
+the common not-found error path, and a linked two-turn `previous_response_id` continuation.
 
 The contract is pinned to the OpenAI OpenAPI document at commit
 `5c044be3bf3a42854e99e34616564eeb2124a317` from 2026-07-23, full-document SHA-256
