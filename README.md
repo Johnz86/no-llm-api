@@ -185,7 +185,14 @@ the rest drives simulation and is visible on `GET /_mock/models`:
     "created": 1735689600,
     "owned_by": "no-llm-api",
     "context_window": 128000,
-    "capabilities": { "tools": true, "vision": false, "audio": false, "reasoning": true },
+    "capabilities": {
+      "tools": true,
+      "vision": false,
+      "audio": false,
+      "reasoning": true,
+      "reasoning_efforts": ["low", "medium", "high"],
+      "structured_output": true
+    },
     "latency": { "ttft_ms": 800, "tokens_per_second": 12, "jitter_ms": 60 }
   }
 ]

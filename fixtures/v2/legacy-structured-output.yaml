@@ -1,0 +1,21 @@
+schema_version: 2
+id: legacy-structured-output
+description: Schema-v2 representation of the legacy conv-json-schema conversation.
+tags: [legacy-import, structured-output]
+interfaces: [chat_completions, responses]
+match:
+  models: [mock-gpt-4o, mock-gpt-4o-mini]
+  turns:
+    - role: user
+      text: Return the release status as JSON.
+requirements:
+  structured_output: true
+cases:
+  - id: release-status
+    constraints:
+      response_format: json_object
+    default_variant: imported
+    variants:
+      imported:
+        structured_output:
+          json: '{"release":"2026.7.1","status":"green","open_defects":0,"owners":["ops","qa"]}'

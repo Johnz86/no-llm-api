@@ -6,9 +6,12 @@ This is a future implementation plan. It does not describe the complete behavior
 The shipped server remains a deterministic, offline Chat Completions test double; the proposed work
 extends that foundation to deeper text, reasoning, structured-output, and Responses-style workflows.
 
-Milestone T0 is complete. The pinned scope, decisions, event/state table, and executable wire corpus
-live in `docs/spec/responses-text-scope.md` and `docs/spec/responses-text-contract/`. Milestones T1
-through T6 remain future work; in particular, the server does not yet expose a Responses route.
+Milestones T0 and T1 are complete. The pinned scope, decisions, event/state table, and executable
+wire corpus live in `docs/spec/responses-text-scope.md` and `docs/spec/responses-text-contract/`.
+Schema-v2 fixtures, deterministic compilation, canonical requests, semantic plans, redacted explain
+output, golden plan snapshots, and reproducible artifacts live under `fixtures/v2`, `sim`, and the
+fixture CLI. Milestones T2 through T6 remain future work; in particular, the shipped Chat renderer
+does not consume semantic plans yet and the server does not expose a Responses route.
 
 The first future delivery stays text-first. It establishes the shared item model, deterministic
 reasoning policy, state transitions, scenario vocabulary, and validation rules that later tool,

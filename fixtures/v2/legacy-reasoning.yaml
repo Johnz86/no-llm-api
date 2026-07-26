@@ -1,0 +1,19 @@
+schema_version: 2
+id: legacy-reasoning
+description: Schema-v2 representation of the legacy conv-reasoning conversation.
+tags: [legacy-import, reasoning]
+interfaces: [chat_completions, responses]
+match:
+  models: [mock-reasoner]
+  turns:
+    - role: user
+      text: Think it through, then answer.
+requirements:
+  reasoning: true
+cases:
+  - id: capital-of-france
+    default_variant: imported
+    variants:
+      imported:
+        reasoning_trace: The user asked for the capital of France. That is Paris, no ambiguity.
+        answer: Paris.

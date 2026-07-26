@@ -42,6 +42,20 @@ pub struct SemanticCapabilities {
     pub structured_output: bool,
 }
 
+impl From<&crate::models::ModelProfile> for SemanticCapabilities {
+    fn from(profile: &crate::models::ModelProfile) -> Self {
+        Self {
+            reasoning_efforts: profile
+                .capabilities
+                .reasoning_efforts
+                .iter()
+                .cloned()
+                .collect(),
+            structured_output: profile.capabilities.structured_output,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SemanticResponsePlan {
     pub version: String,
@@ -414,7 +428,7 @@ fn resolve_variant<'a>(
     Ok((&case.default_variant, variant, VariantReason::Default))
 }
 
-fn output_nodes(
+pub(crate) fn output_nodes(
     fixture: &SemanticFixture,
     case: &SemanticCase,
     variant_id: &str,

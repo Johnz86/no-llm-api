@@ -1,3 +1,4 @@
+pub mod artifact;
 pub mod canonical;
 pub mod digest;
 pub mod directive;

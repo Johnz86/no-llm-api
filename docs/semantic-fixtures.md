@@ -16,6 +16,24 @@ Validate another directory without loading the built-ins:
 cargo run --locked --bin fixtures -- lint-semantic --input path/to/fixtures
 ```
 
+Compile a reproducible artifact:
+
+```bash
+cargo run --locked --bin fixtures -- build-semantic --output data/semantic-fixtures.json
+```
+
+Given a typed Chat request saved as JSON, inspect either its redacted selection explanation or its
+complete immutable plan:
+
+```bash
+cargo run --locked --bin fixtures -- explain-semantic --request request.json
+cargo run --locked --bin fixtures -- snapshot-semantic --request request.json
+```
+
+All semantic commands accept `--input`; build and planning commands also accept `--models` for an
+explicit model catalogue. `--case fixture-id/case-id` and `--variant variant-id` provide stable,
+request-local test selection without a mutable response queue.
+
 Each YAML document declares `schema_version: 2`, a canonical lower-kebab-case id, description,
 tags, supported interfaces, matching turns, capability requirements, and one or more cases. A case
 contains typed constraints and a sorted variant map. It names a required default variant and may
@@ -37,7 +55,10 @@ The built-in examples live under `fixtures/v2/`:
 
 - `basic-text.yaml` contains a shared Chat/Responses text outcome;
 - `reasoning-effort.yaml` contains low, medium, and high authored effort variants;
+- `multi-turn-correction.yaml` requires a complete ordered conversation before selecting its reply;
 - `structured-output.yaml` contains a strict JSON-shaped semantic value.
+- `legacy-*.yaml` documents byte-preserving imports of representative markdown, reasoning, and
+  structured-output conversations from the shipped Chat fixtures.
 
 The legacy files directly under `fixtures/` remain the source for the shipped Chat dataset. Use
 `fixtures lint` and `fixtures build` for them; never send schema-v2 files through the legacy parquet
@@ -57,4 +78,9 @@ Dataset, scenario, model-profile, and simulation-seed revisions participate in p
 
 The plan explanation exposes fixture/case/variant selection, effective revision controls, request
 digest, and redacted turn shapes. It reports content kinds and byte lengths but never prompt or
-reasoning text. These APIs are currently library-only and are not connected to the HTTP routes.
+reasoning text. Planning is available through the fixture CLI but is not connected to HTTP routes.
+
+`sim::artifact` sorts every unordered input, rejects overlapping equal-priority cases and unknown
+or incapable models, tokenizes reasoning and visible output independently, and emits compiler,
+selection, tokenizer, and source revisions. The resulting JSON bytes reproduce across shuffled
+source enumeration and fresh compiler processes.

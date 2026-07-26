@@ -12,7 +12,7 @@ use serde_json::Value;
 
 pub const SCHEMA_VERSION: u16 = 2;
 
-pub const BUILTINS: [(&str, &str); 3] = [
+pub const BUILTINS: [(&str, &str); 7] = [
     (
         "basic-text",
         include_str!("../../fixtures/v2/basic-text.yaml"),
@@ -22,8 +22,24 @@ pub const BUILTINS: [(&str, &str); 3] = [
         include_str!("../../fixtures/v2/reasoning-effort.yaml"),
     ),
     (
+        "multi-turn-correction",
+        include_str!("../../fixtures/v2/multi-turn-correction.yaml"),
+    ),
+    (
         "structured-output",
         include_str!("../../fixtures/v2/structured-output.yaml"),
+    ),
+    (
+        "legacy-markdown",
+        include_str!("../../fixtures/v2/legacy-markdown.yaml"),
+    ),
+    (
+        "legacy-reasoning",
+        include_str!("../../fixtures/v2/legacy-reasoning.yaml"),
+    ),
+    (
+        "legacy-structured-output",
+        include_str!("../../fixtures/v2/legacy-structured-output.yaml"),
     ),
 ];
 

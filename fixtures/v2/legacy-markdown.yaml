@@ -1,0 +1,34 @@
+schema_version: 2
+id: legacy-markdown
+description: Schema-v2 representation of the legacy conv-markdown conversation.
+tags: [legacy-import, text, markdown]
+interfaces: [chat_completions, responses]
+match:
+  models: [mock-gpt-4o, mock-gpt-4o-mini]
+  turns:
+    - role: user
+      text: Show me a markdown-heavy answer.
+cases:
+  - id: deployment-checklist
+    default_variant: imported
+    variants:
+      imported:
+        answer: |
+          ## Deployment checklist
+
+          1. Run `cargo test`
+          2. Tag the release
+          3. Push the image
+
+          | Stage | Owner | Status |
+          | --- | --- | --- |
+          | build | CI | green |
+          | deploy | ops | pending |
+
+          ```rust
+          fn main() {
+              println!("hello");
+          }
+          ```
+
+          > Note: the mock never contacts a real model.
