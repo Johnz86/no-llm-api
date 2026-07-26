@@ -21,7 +21,7 @@ lifecycles, while endpoint tests cover staged errors, deliberate drops, and cons
 The locked official client reconstructs text, public summaries, structured output, and refusals from
 events. Responses output budgets consume reasoning before visible output, use tokenizer-derived
 usage, and terminate incomplete streams through the same event state machine. Milestones T0 through
-T5 are complete; T6 remains future work. T5 provides immutable process-local storage, retrieval,
+T6 are complete. T5 provides immutable process-local storage, retrieval,
 deletion, counter-free `previous_response_id` continuation, deterministic branching, cumulative
 input accounting, redacted diagnostics, reset semantics, and explicit scenario-driven expiry.
 Conversation resources own typed item logs with deterministic batching, pagination, item lifecycle,
@@ -591,11 +591,12 @@ Exit: all continuation forms, branches, retries, and failures are reproducible u
 
 ### T6: Stabilize the extension boundary
 
-Status: in progress. Output items now expose shared typed identity/kind/content accessors, and the
+Status: complete. Output items expose shared typed identity/kind/content accessors, and the
 stream scheduler carries typed reasoning/output/tool/terminal stage metadata independently from
 wire event names. Text/reasoning identities and event ordering remain covered by contract tests.
 Fixture authoring examples, migration safeguards, and the experimental `1.0.0` compatibility
-boundary are documented. Final browser and packaging verification remains pending.
+boundary are documented. The browser/official-client suite, native release build, clean Cargo
+package verification, container build, and container configuration probe all pass.
 
 - extract output-item and stage abstractions needed by future tool/MCP/skill and media plans;
 - publish fixture authoring examples, compatibility guarantees, and migration notes;
