@@ -58,6 +58,8 @@ configuration surface moved.
 
 ### Changed
 
+- The README and technical documentation now describe the completed repository in present tense;
+  obsolete roadmap and implementation-planning documents are removed.
 - Live proxying is behind the `live` feature. The default build links no HTTP client.
 - Request fields are typed: `stop`, `response_format`, `tools`, `tool_choice`, `audio`,
   `modalities`, `reasoning_effort`, `service_tier`, `logit_bias` (`i8`) and `seed`

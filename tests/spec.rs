@@ -31,7 +31,7 @@ fn the_extract_covers_every_path_the_mock_implements() {
 }
 
 #[test]
-fn the_extract_carries_the_schemas_the_plans_cite() {
+fn the_extract_carries_the_schemas_the_implementation_uses() {
     let spec = extract();
     let schemas = spec["components"]["schemas"].as_mapping().expect("schemas");
     for schema in [
@@ -112,16 +112,17 @@ fn the_extract_keeps_seed_bounds_numeric_and_valid() {
 }
 
 #[test]
-fn plans_do_not_cite_the_untracked_full_spec_for_implemented_surface() {
+fn maintained_docs_do_not_line_cite_the_untracked_full_spec() {
     for path in [
-        "docs/plans/01-api-surface-gap-analysis.md",
-        "docs/plans/02-simulation-engine.md",
-        "docs/plans/03-chat-gui-compatibility.md",
-        "docs/plans/04-testing-and-ci.md",
+        "README.md",
+        "docs/README.md",
+        "docs/spec/chat-completions-scope.md",
+        "docs/spec/upstream-openapi.md",
+        "docs/versioning.md",
     ] {
-        let plan = std::fs::read_to_string(path).expect(path);
+        let document = std::fs::read_to_string(path).expect(path);
         assert!(
-            !plan.contains("`openapi.yaml:"),
+            !document.contains("`openapi.yaml:"),
             "{path} still has a line citation into the untracked full spec"
         );
     }

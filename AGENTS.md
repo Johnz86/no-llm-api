@@ -8,7 +8,7 @@
 - Module-level unit tests live in inline `#[cfg(test)]` blocks. Cross-module and client-contract tests live in `tests/`; `tests/support/` holds the shared fixture builder and the SSE transcript harness.
 - Browser integration tests live in `e2e/` and run separately with `npm --prefix e2e test`; they are never part of `cargo test`.
 - Generated parquet fixtures reside under `data/` (created on demand). Keep additional scripted datasets there to avoid polluting `src/`.
-- Plans and design notes live in `docs/`; start at `docs/plans/00-roadmap.md`. The distilled Chat Completions contract is `docs/spec/chat-completions-scope.md`.
+- Maintained technical documentation lives in `docs/`; start at `docs/README.md`. The implemented Chat Completions contract is `docs/spec/chat-completions-scope.md`.
 - The tracked spec reference is `docs/spec/chat-completions.openapi.yaml`, a generated 144 KB extract of the paths this mock implements plus their schemas. Regenerate it with `cargo run --bin spec_extract` after refreshing the full upstream document with `scripts/fetch-openapi.ps1` (or `.sh`); `openapi.yaml` itself is gitignored. Never hand-edit either file, and check `openapi.provenance.json` rather than upstream's `info.version`, which never moves. See `docs/spec/upstream-openapi.md`.
 
 ## Build, Test, and Development Commands

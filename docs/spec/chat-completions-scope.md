@@ -1,9 +1,8 @@
-# Chat Completions Mock Scope
+# Implemented Chat Completions contract
 
-This document distills the relevant portions of `openapi.yaml` for the Chat
-Completions surface so we can expand the mock service in a controlled,
-spec-driven way. Everything here applies to both the root-prefixed routes
-(`/chat/...`) and their OpenAI-compatible aliases under `/v1/chat/...`.
+This document defines the Chat Completions behavior implemented by `no-llm-api`. It distills the
+relevant OpenAI schemas into the contract exercised by this repository. Everything applies to both
+the root routes (`/chat/...`) and their OpenAI-compatible aliases under `/v1/chat/...`.
 
 ## Endpoints
 
@@ -63,8 +62,8 @@ spec-driven way. Everything here applies to both the root-prefixed routes
   is the only documented flag.
 - `store` (boolean, optional, default false).
 - Additional passthrough fields: `user`, `service_tier`, `reasoning_effort`,
-  `audio`, `logit_bias`, `response_prefix`, `function_call` (deprecated) should
-  be accepted but may be ignored by the mock.
+  `audio`, `logit_bias`, `response_prefix`, and deprecated `function_call` are
+  accepted but may be ignored by the mock.
 
 ### ChatCompletionRequestMessage
 
@@ -84,7 +83,8 @@ spec-driven way. Everything here applies to both the root-prefixed routes
   `model`, `system_fingerprint`, `service_tier`, `request_id` (nullable),
   `metadata` (object or `{}`).
 - `usage` — see below.
-- `choices` — array of `ChatCompletionChoice`; the mock can cap at one choice.
+- `choices` — array of indexed `ChatCompletionChoice` values, with `n` deterministic alternatives
+  when requested.
 - Optional passthrough echoes: `top_p`, `temperature`, `frequency_penalty`,
   `presence_penalty`, `seed`, `response_format`, `tool_choice`, `tools`,
   `parallel_tool_calls`, `reasoning`, `audio`.
@@ -104,17 +104,18 @@ spec-driven way. Everything here applies to both the root-prefixed routes
 ### ChatCompletionUsage
 
 - `prompt_tokens`, `completion_tokens`, `total_tokens` (integers).
-- When streaming with `stream_options.include_usage`, the final chunk should
-  surface this payload.
+- With `stream_options.include_usage`, the final chunk surfaces this payload.
 
 ### ChatCompletionChunk (Streaming)
 
 - Same `id`, `object: "chat.completion.chunk"`, `created`, `model`.
 - `choices`: each has `index`, `delta` (`ChatCompletionChunkDelta`),
   optional `finish_reason`, optional `logprobs`.
-- `delta` includes incremental `role`, `content`, `tool_calls`, `function_call`.
-- Final SSE frame should be `data: {"choices":[{"delta":{},"finish_reason":"stop","index":0}]}`
-  (or equivalent) followed by `data: [DONE]`.
+- `delta` includes incremental `role`, `content`, `reasoning_content`, `refusal`, `tool_calls`, and
+  `function_call` members when relevant.
+- The final SSE choice frame is
+  `data: {"choices":[{"delta":{},"finish_reason":"stop","index":0}]}` (with the selected finish
+  reason), followed by `data: [DONE]`.
 
 ### ChatCompletionList
 
@@ -133,8 +134,8 @@ spec-driven way. Everything here applies to both the root-prefixed routes
 
 ### Error Envelope
 
-- Always return `{"error": {"message": "...", "type": "invalid_request_error"}}`
-  with appropriate HTTP status for bad requests or missing resources.
+- Every error returns `{"error":{"message":"...","type":"...","param":null,"code":null}}` with
+  all four members present and an appropriate HTTP status.
 
 ## Tracking & Persistence Rules
 
@@ -145,16 +146,21 @@ spec-driven way. Everything here applies to both the root-prefixed routes
   when more remain.
 - Sorting supports ascending (oldest first) and descending (newest first)
   orderings.
-- `model` and `metadata[key]=value` filters should apply before pagination.
-- `request_id`, `seed`, and other tuning values returned from creation should
-  be stable when fetching the same completion later.
+- `model` and `metadata[key]=value` filters apply before pagination.
+- `request_id`, `seed`, and other tuning values returned from creation remain stable when fetching
+  the same completion later.
 
-## Implementation Notes
+## Runtime guarantees
 
-- Maintain SSE timing controls (tokens-per-second) while reshaping events to
-  match `ChatCompletionChunk`.
-- Accept, validate, and echo fields even if the mock does not act on them so
-  client integrations built against the OpenAPI document continue to work.
-- Align serde models with this scope to avoid ad-hoc `serde_json::Value`
-  plumbing once we implement the remaining endpoints.
-
+- Fixture selection is a pure function of the model and normalized conversation. Identical requests
+  produce identical response bodies and SSE transcripts in derived identity mode, including under
+  concurrency.
+- Token pacing changes delivery time without changing the sequence or bytes of the reconstructed
+  response.
+- Unknown request members remain forward-compatible and are ignored. Known members are strongly
+  typed and validated; invalid types and documented range violations return the standard error
+  envelope.
+- Every response exposes `x-request-id` and `x-no-llm-api-version`. Completion responses also expose
+  `x-simulate-match` for fixture-selection diagnostics.
+- The real `async-openai` 0.41.1 client exercises non-streamed, streamed, usage, tool-call, refusal,
+  and model-discovery contracts in the default test suite.

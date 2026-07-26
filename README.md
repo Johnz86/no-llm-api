@@ -1,15 +1,53 @@
 # No LLM API
 
-A lean mock of the OpenAI Chat Completions API that serves deterministic responses from parquet fixtures, supports live proxying through the real async-openai client, and provides tooling to capture/curate datasets for regression testing.
+`no-llm-api` is a deterministic, offline test double for the OpenAI Chat Completions API. It gives
+chat applications realistic HTTP responses and paced SSE streams without loading a model, making a
+network call, or consuming API credit. Responses come from versioned conversation fixtures and are
+stable across processes, machines, and concurrent requests.
 
-## Quick Start
+The repository includes the reusable Rust library, the server CLI, fixture authoring tools, an
+opt-in live recorder, a browser test page, container packaging, and an Open WebUI compatibility
+stack. The default binary contains no upstream HTTP client or TLS stack.
+
+## Quick start
 
 ```bash
 cargo build
 cargo run
 ```
 
-The binary listens on `127.0.0.1:8080` by default. On first launch it materialises `data/conversations.parquet` using bundled fixtures.
+The binary listens on `127.0.0.1:8080` by default. On first launch it materialises
+`data/conversations.parquet` from the bundled fixtures. Send a normal OpenAI-compatible request:
+
+```bash
+curl http://127.0.0.1:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"mock-gpt-4o","messages":[{"role":"user","content":"Summarize the sprint update."}]}'
+```
+
+Add `"stream":true` and use `curl -N` to observe the paced SSE transcript.
+
+## Request behaviour
+
+Every request follows the same deterministic pipeline:
+
+1. The server validates the OpenAI-shaped request and selects a fixture from the requested model and
+   normalized conversation. Case and whitespace do not affect matching.
+2. Multi-turn conversation-prefix matches take precedence over suffix matches and exact last-user
+   matches. An unknown prompt falls back to a stable fixture selected with FNV-1a.
+3. The selected fixture supplies content, refusals, reasoning, tool or function calls, audio
+   metadata, and finish reasons. The configured tokenizer calculates usage and stream pieces.
+   Request limits such as `n` and `max_completion_tokens` shape the returned choices without
+   introducing nondeterminism.
+4. A non-streamed request receives one JSON completion. A streamed request receives OpenAI-shaped
+   SSE deltas, one terminal choice frame per choice, an optional final usage frame, and `[DONE]`.
+5. Scenario and per-request directives control timing and faults. They never change which fixture is
+   selected.
+
+Derived identity mode makes completion ids, timestamps, payload request ids, fingerprints, response
+bodies, and complete SSE transcripts reproducible. There are no counters, fixture rotation, or
+wall-clock inputs in this mode. The `x-simulate-match` response header reports the matching rung used
+for a request.
 
 ## Configuration
 
@@ -82,7 +120,16 @@ with `status`, `retry_after`, `after_ms`, `after_frames`, `rate`; plus `ttft_ms`
 | `GET /_mock/models` | Catalogue including simulation profiles. |
 | `GET /_mock/requests` | The last 100 requests, with credentials redacted. |
 
-When `DATASET_SOURCE=live`, supply credentials for either OpenAI (`OPENAI_API_KEY`, optional `OPENAI_API_BASE`, `OPENAI_ORG_ID`, `OPENAI_PROJECT_ID`) or Azure OpenAI (`AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT_NAME`, optional `AZURE_OPENAI_API_VERSION`). The server converts live responses back into the mock schema so existing clients continue to work.
+## Health, metrics, and logs
+
+`GET /health` reports process liveness without reading the dataset. `GET /ready` reports whether the
+server has fixtures available and includes the active version, scenario, tokenizer, model count, and
+stream rate. Both routes bypass API authentication and simulated faults. The `health --url` CLI
+subcommand probes readiness without requiring `curl`.
+
+Set `NO_LLM_METRICS=true` to expose six Prometheus counters at `GET /metrics`: requests,
+completions, streams, cancelled streams, injected faults, and error responses. Compact structured
+request logs use `RUST_LOG` filtering and never record credential values.
 
 ## Docker
 
@@ -107,9 +154,15 @@ cannot reach a paid API even if credentials are present in its environment. Prox
 requires the `live` feature:
 
 ```bash
-cargo run --features live      # then set DATASET_SOURCE=live
+DATASET_SOURCE=live cargo run --features live --bin no-llm-api
 cargo run --features live --bin recorder -- --input recordings.json
 ```
+
+Supply credentials for either OpenAI (`OPENAI_API_KEY`, optional `OPENAI_API_BASE`, `OPENAI_ORG_ID`,
+`OPENAI_PROJECT_ID`) or Azure OpenAI (`AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`,
+`AZURE_OPENAI_DEPLOYMENT_NAME`, optional `AZURE_OPENAI_API_VERSION`). Azure configuration takes
+precedence when its endpoint is present. Live responses are converted back into the same mock schema
+used by fixture mode.
 
 Without it, `DATASET_SOURCE=live` exits with an explanatory error rather than starting a server that
 cannot proxy.
@@ -149,7 +202,7 @@ A fixture reply that starts with `<think>...</think>` is split: the tag content 
 content, and its tokens are reported in `usage.completion_tokens_details.reasoning_tokens`. The
 thinking tag never leaks into `content`.
 
-## Working with Datasets
+## Working with datasets
 
 Fixtures are authored as YAML in `fixtures/`, one file per conversation, and compiled to parquet:
 
@@ -192,13 +245,13 @@ This recreates `data/conversations.parquet` with the enriched schema (tool calls
 ### Record new live conversations
 
 ```bash
-cargo run --bin recorder -- \
+cargo run --features live --bin recorder -- \
   --input recordings.json \
   --output data/recordings.parquet \
   --tokenizer cl100k_base
 ```
 
-`recordings.json` should be an array of objects shaped like:
+`recordings.json` is an array of objects shaped like:
 
 ```jsonc
 [
@@ -216,21 +269,7 @@ cargo run --bin recorder -- \
 
 The CLI replays each request via async-openai, serialises the full response (including streaming metadata) into the expanded parquet rows, and appends them to the target file. It honours the same credential environment variables as live mode.
 
-## Running in Live Mode
-
-1. Export the relevant OpenAI or Azure OpenAI credentials.
-2. Launch the server with `DATASET_SOURCE=live`. For example:
-
-   ```bash
-   DATASET_SOURCE=live \
-   LIVE_RECORD=1 \
-   LIVE_RECORD_PATH=data/live.parquet \
-   cargo run
-   ```
-
-   The service proxies requests to the configured backend, optionally storing each completion to the parquet file for deterministic replays.
-
-## API Surface
+## API surface
 
 The server mirrors the primary Chat Completions endpoints, exposed both at the root and under `/v1`:
 
@@ -244,10 +283,11 @@ The server mirrors the primary Chat Completions endpoints, exposed both at the r
 - `GET /models/{model_id}`
 - `GET /health` and `GET /ready` (unversioned)
 
-Plus two unversioned routes: `GET /` serves the bundled test page (embedded in the binary, so it works
-from any working directory) and `GET /health` reports liveness without touching the dataset.
+`GET /` is also unversioned and serves the bundled test page. The page is embedded in the binary, so
+it works from any working directory.
 
-Responses include usage data, tool/function call metadata, finish reasons, audio attachments, and refusal text when available.
+Responses include usage data, tool and function call metadata, reasoning content, finish reasons,
+audio attachments, and refusal text when the fixture supplies them.
 
 Errors always use the spec envelope with all four members present, including explicit nulls, because
 clients read `code` and `param` straight off the body:
@@ -258,6 +298,10 @@ clients read `code` and `param` straight off the body:
 
 Every response carries `x-request-id`; a caller-supplied value is echoed back. CORS mirrors the request
 origin and the requested headers, so SDK-specific headers never need an allow-list update.
+
+Only completions created with `"store": true` enter the in-memory completion store. Stored records
+support retrieval, metadata replacement, deletion, filtering, cursor pagination, and message
+pagination for the lifetime of the process.
 
 ## Testing
 
@@ -277,16 +321,16 @@ origin and the requested headers, so SDK-specific headers never need an allow-li
   check runs weekly and on demand in the Open WebUI compatibility workflow because its image is
   too large for every pull-request job.
 
-## Notes
-
-- Streaming completions emit SSE chunks at the configured token rate and always terminate with `[DONE]`. When `stream_options.include_usage=true`, a final usage chunk is delivered.
-- Only completions created with `"store": true` are persisted for later retrieval, metadata updates, or message pagination.
-- The repository exposes itself as a library (`no_llm_api`) so integration tests and custom binaries can reuse internal modules.
-
 ## Documentation
 
-- `docs/plans/00-roadmap.md` - the plan of record: milestones, work items, and open decisions.
-- `docs/spec/chat-completions-scope.md` - the distilled Chat Completions contract this mock targets.
-- `docs/versioning.md` - what a version bump means for a consumer, and the release checklist.
-- `CHANGELOG.md` - every release, with wire-behaviour changes called out first.
-- `AGENTS.md` - repository conventions for contributors and coding agents.
+- [`docs/README.md`](docs/README.md) indexes the maintained technical documentation.
+- [`docs/spec/chat-completions-scope.md`](docs/spec/chat-completions-scope.md) defines the implemented
+  Chat Completions contract.
+- [`docs/spec/upstream-openapi.md`](docs/spec/upstream-openapi.md) explains the tracked OpenAPI extract
+  and its refresh procedure.
+- [`docs/versioning.md`](docs/versioning.md) defines compatibility and the release process.
+- [`CHANGELOG.md`](CHANGELOG.md) records wire-behaviour and repository changes.
+- [`AGENTS.md`](AGENTS.md) contains contributor and coding-agent conventions.
+
+The crate also exposes the `no_llm_api` library so integration tests and custom binaries can reuse
+the same configuration, dataset, simulation, service, and router implementations as the server.
