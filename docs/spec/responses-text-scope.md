@@ -103,6 +103,10 @@ and the parsed value separately so byte reconstruction and semantic validation r
 
 ## State and selection decisions
 
+- `store: true` saves an immutable process-local Response object after request validation and
+  pre-response fault checks. `GET /v1/responses/{response_id}` retrieves the exact object and
+  `DELETE` returns `{id, object: "response", deleted: true}`; stateless responses are not
+  retrievable.
 - `previous_response_id` requires an immutable stored predecessor. A response created with
   `store: false` is continued by replaying all prior output items, including opaque encrypted
   reasoning where present.

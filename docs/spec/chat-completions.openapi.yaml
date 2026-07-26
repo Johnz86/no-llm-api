@@ -2664,6 +2664,194 @@ paths:
               "user": null,
               "metadata": {}
             }
+  /responses/{response_id}:
+    get:
+      operationId: getResponse
+      tags:
+      - Responses
+      summary: |
+        Retrieves a model response with the given ID.
+      parameters:
+      - in: path
+        name: response_id
+        required: true
+        schema:
+          type: string
+          example: resp_677efb5139a88190b512bc3fef8e535d
+        description: The ID of the response to retrieve.
+      - in: query
+        name: include
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/IncludeEnum'
+        description: |
+          Additional fields to include in the response. See the `include`
+          parameter for Response creation above for more information.
+      - in: query
+        name: stream
+        schema:
+          type: boolean
+        description: |
+          If set to true, the model response data will be streamed to the client
+          as it is generated using [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format).
+          See the [Streaming section below](/docs/api-reference/responses-streaming)
+          for more information.
+      - in: query
+        name: starting_after
+        schema:
+          type: integer
+        description: |
+          The sequence number of the event after which to start streaming.
+      - in: query
+        name: include_obfuscation
+        schema:
+          type: boolean
+        description: |
+          When true, stream obfuscation will be enabled. Stream obfuscation adds
+          random characters to an `obfuscation` field on streaming delta events
+          to normalize payload sizes as a mitigation to certain side-channel
+          attacks. These obfuscation fields are included by default, but add a
+          small amount of overhead to the data stream. You can set
+          `include_obfuscation` to false to optimize for bandwidth if you trust
+          the network links between your application and the OpenAI API.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+      x-oaiMeta:
+        name: Get a model response
+        group: responses
+        examples:
+          request:
+            curl: |
+              curl https://api.openai.com/v1/responses/resp_123 \
+                  -H "Content-Type: application/json" \
+                  -H "Authorization: Bearer $OPENAI_API_KEY"
+            javascript: |
+              import OpenAI from "openai";
+              const client = new OpenAI();
+
+              const response = await client.responses.retrieve("resp_123");
+              console.log(response);
+            python: |
+              from openai import OpenAI
+              client = OpenAI()
+
+              response = client.responses.retrieve("resp_123")
+              print(response)
+          response: |
+            {
+              "id": "resp_67cb71b351908190a308f3859487620d06981a8637e6bc44",
+              "object": "response",
+              "created_at": 1741386163,
+              "status": "completed",
+              "completed_at": 1741386164,
+              "error": null,
+              "incomplete_details": null,
+              "instructions": null,
+              "max_output_tokens": null,
+              "model": "gpt-4o-2024-08-06",
+              "output": [
+                {
+                  "type": "message",
+                  "id": "msg_67cb71b3c2b0819084d481baaaf148f206981a8637e6bc44",
+                  "status": "completed",
+                  "role": "assistant",
+                  "content": [
+                    {
+                      "type": "output_text",
+                      "text": "Silent circuits hum,  \nThoughts emerge in data streams—  \nDigital dawn breaks.",
+                      "annotations": []
+                    }
+                  ]
+                }
+              ],
+              "parallel_tool_calls": true,
+              "previous_response_id": null,
+              "reasoning": {
+                "effort": null,
+                "summary": null
+              },
+              "store": true,
+              "temperature": 1.0,
+              "text": {
+                "format": {
+                  "type": "text"
+                }
+              },
+              "tool_choice": "auto",
+              "tools": [],
+              "top_p": 1.0,
+              "truncation": "disabled",
+              "usage": {
+                "input_tokens": 32,
+                "input_tokens_details": {
+                  "cached_tokens": 0,
+                  "cache_write_tokens": 0
+                },
+                "output_tokens": 18,
+                "output_tokens_details": {
+                  "reasoning_tokens": 0
+                },
+                "total_tokens": 50
+              },
+              "user": null,
+              "metadata": {}
+            }
+    delete:
+      operationId: deleteResponse
+      tags:
+      - Responses
+      summary: |
+        Deletes a model response with the given ID.
+      parameters:
+      - in: path
+        name: response_id
+        required: true
+        schema:
+          type: string
+          example: resp_677efb5139a88190b512bc3fef8e535d
+        description: The ID of the response to delete.
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-oaiMeta:
+        name: Delete a model response
+        group: responses
+        examples:
+          request:
+            curl: |
+              curl -X DELETE https://api.openai.com/v1/responses/resp_123 \
+                  -H "Content-Type: application/json" \
+                  -H "Authorization: Bearer $OPENAI_API_KEY"
+            javascript: |
+              import OpenAI from "openai";
+              const client = new OpenAI();
+
+              const response = await client.responses.delete("resp_123");
+              console.log(response);
+            python: |
+              from openai import OpenAI
+              client = OpenAI()
+
+              response = client.responses.delete("resp_123")
+              print(response)
+          response: |
+            {
+              "id": "resp_6786a1bec27481909a17d673315b29f6",
+              "object": "response",
+              "deleted": true
+            }
 components:
   schemas:
     AdditionalTools:

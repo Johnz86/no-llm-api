@@ -149,6 +149,13 @@ pub struct ResponseObject {
     pub metadata: Map<String, Value>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ResponseDeleted {
+    pub id: String,
+    pub object: &'static str,
+    pub deleted: bool,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ResponseStatus {

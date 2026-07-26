@@ -6,6 +6,7 @@ use serde_json::{Map, Value};
 use tokio::sync::RwLock;
 
 use crate::model::{ChatCompletionDeleted, ChatCompletionResponse, StoredMessage};
+use crate::responses::{ResponseDeleted, ResponseObject};
 
 #[derive(Debug, Clone, Default)]
 pub struct ListFilters {
@@ -16,6 +17,38 @@ pub struct ListFilters {
 #[derive(Clone, Default)]
 pub struct CompletionStore {
     inner: Arc<RwLock<IndexMap<String, StoredCompletion>>>,
+}
+
+#[derive(Clone, Default)]
+pub struct ResponseStore {
+    inner: Arc<RwLock<IndexMap<String, ResponseObject>>>,
+}
+
+impl ResponseStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub async fn save(&self, response: ResponseObject) {
+        let mut guard = self.inner.write().await;
+        guard.entry(response.id.clone()).or_insert(response);
+    }
+
+    pub async fn get(&self, id: &str) -> Option<ResponseObject> {
+        self.inner.read().await.get(id).cloned()
+    }
+
+    pub async fn delete(&self, id: &str) -> Option<ResponseDeleted> {
+        self.inner
+            .write()
+            .await
+            .shift_remove(id)
+            .map(|response| ResponseDeleted {
+                id: response.id,
+                object: "response",
+                deleted: true,
+            })
+    }
 }
 
 impl CompletionStore {
@@ -267,6 +300,67 @@ mod tests {
                 audio: None,
             },
         ]
+    }
+
+    #[tokio::test]
+    async fn responses_are_immutable_and_delete_is_explicit() {
+        let store = ResponseStore::new();
+        let mut first = sample_response_object("resp_test");
+        store.save(first.clone()).await;
+        first.model = "changed-model".to_string();
+        store.save(first).await;
+
+        assert_eq!(store.get("resp_test").await.unwrap().model, "test-model");
+        assert_eq!(
+            serde_json::to_value(store.delete("resp_test").await.unwrap()).unwrap(),
+            json!({"id": "resp_test", "object": "response", "deleted": true})
+        );
+        assert!(store.get("resp_test").await.is_none());
+        assert!(store.delete("resp_test").await.is_none());
+    }
+
+    fn sample_response_object(id: &str) -> ResponseObject {
+        serde_json::from_value::<crate::responses::CreateResponseRequest>(json!({
+            "model": "test-model",
+            "input": "hello"
+        }))
+        .map(|request| {
+            let plan = crate::sim::plan::SemanticResponsePlan {
+                version: "test".to_string(),
+                fixture_id: "test".to_string(),
+                case_id: "test".to_string(),
+                variant_id: "test".to_string(),
+                interface: crate::sim::script::Interface::Responses,
+                model: "test-model".to_string(),
+                output: vec![crate::sim::plan::SemanticOutput::Text {
+                    text: "ok".to_string(),
+                }],
+                terminal: crate::sim::script::TerminalStatus::Completed,
+                usage: crate::sim::plan::SemanticUsage::default(),
+                plan_digest: "0000000000000001".to_string(),
+                explanation: crate::sim::plan::PlanExplanation {
+                    match_kind: crate::sim::plan::SemanticMatchKind::Exact,
+                    fixture_id: "test".to_string(),
+                    case_id: "test".to_string(),
+                    variant_id: "test".to_string(),
+                    variant_reason: crate::sim::plan::VariantReason::Default,
+                    canonical_request_digest: "test".to_string(),
+                    turn_shapes: Vec::new(),
+                    effective_controls: crate::sim::plan::EffectiveControls {
+                        dataset_revision: "test".to_string(),
+                        scenario_revision: "test".to_string(),
+                        model_profile_revision: "test".to_string(),
+                        simulation_seed: None,
+                    },
+                },
+            };
+            crate::responses::render_response(&request, &plan, &tiktoken_rs::cl100k_base().unwrap())
+        })
+        .map(|mut response| {
+            response.id = id.to_string();
+            response
+        })
+        .unwrap()
     }
 
     #[tokio::test]

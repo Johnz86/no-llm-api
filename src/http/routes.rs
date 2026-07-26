@@ -33,7 +33,7 @@ use crate::sim::plan::{PlanError, SemanticCapabilities, SemanticOutput, Semantic
 use crate::sim::responses_stream::{ResponsesStreamPlan, responses_sse_stream};
 use crate::sim::scenario::{FaultKind, Scenario, Timing};
 use crate::sim::stream::{CancelCounter, StreamPlan, sse_stream};
-use crate::store::{ListFilters, SortOrder};
+use crate::store::{ListFilters, ResponseStore, SortOrder};
 
 /// The page served at `/`, embedded so the binary works from any directory.
 const INDEX_HTML: &str = include_str!("../../index.html");
@@ -55,6 +55,7 @@ pub struct AppState {
     pub cancels: Arc<CancelCounter>,
     pub models: ModelCatalogue,
     pub semantic: Arc<SemanticArtifact>,
+    pub responses: ResponseStore,
     /// The live behaviour profile, swappable through the control plane.
     pub scenario: Arc<ArcSwap<Scenario>>,
     /// The profile the process started with, restored by `POST /_mock/reset`.
@@ -114,6 +115,7 @@ pub fn build_router_with_options(
         cancels: Arc::new(CancelCounter::default()),
         models: options.models,
         semantic: builtin_artifact(),
+        responses: ResponseStore::new(),
         scenario: Arc::new(ArcSwap::new(boot_scenario.clone())),
         boot_scenario,
         seed: options.seed,
@@ -138,6 +140,10 @@ pub fn build_router_with_options(
             get(get_chat_completion_messages),
         )
         .route("/responses", post(create_response))
+        .route(
+            "/responses/{response_id}",
+            get(get_response).delete(delete_response),
+        )
         .route("/models", get(list_models))
         .route("/models/{model_id}", get(get_model))
         .with_state(state.clone());
@@ -535,6 +541,9 @@ async fn create_response(
         return Err(http_fault_error(&fault));
     }
     state.metrics.record_completion(request.stream);
+    if request.store {
+        state.responses.save(response.clone()).await;
+    }
 
     let diagnostics = SemanticDiagnostics {
         dataset_revision: plan.explanation.effective_controls.dataset_revision.clone(),
@@ -582,6 +591,30 @@ async fn create_response(
     Ok(wire)
 }
 
+async fn get_response(
+    State(state): State<AppState>,
+    Path(response_id): Path<String>,
+) -> Result<Json<crate::responses::ResponseObject>, ApiError> {
+    state
+        .responses
+        .get(&response_id)
+        .await
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(&response_id))
+}
+
+async fn delete_response(
+    State(state): State<AppState>,
+    Path(response_id): Path<String>,
+) -> Result<Json<crate::responses::ResponseDeleted>, ApiError> {
+    state
+        .responses
+        .delete(&response_id)
+        .await
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(&response_id))
+}
+
 fn validate_response_request(request: &CreateResponseRequest) -> Result<(), ApiError> {
     if matches!(&request.input, ResponseInput::Text(text) if text.is_empty())
         || matches!(&request.input, ResponseInput::Items(items) if items.is_empty())
@@ -590,13 +623,6 @@ fn validate_response_request(request: &CreateResponseRequest) -> Result<(), ApiE
             "Invalid value for 'input': expected non-empty input.",
         )
         .with_param("input"));
-    }
-    if request.store {
-        return Err(ApiError::invalid_request(
-            "Responses persistence is not implemented in this release.",
-        )
-        .with_param("store")
-        .with_code("unsupported_parameter"));
     }
     if request.previous_response_id.is_some() {
         return Err(ApiError::invalid_request(

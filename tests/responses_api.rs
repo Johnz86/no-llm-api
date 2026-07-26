@@ -130,7 +130,6 @@ async fn schema_mismatch_uses_the_common_error_envelope() {
 #[tokio::test]
 async fn unsupported_future_controls_fail_explicitly() {
     for (field, value) in [
-        ("store", json!(true)),
         ("previous_response_id", json!("resp_parent")),
         ("tools", json!([{"type": "function"}])),
     ] {
@@ -146,6 +145,78 @@ async fn unsupported_future_controls_fail_explicitly() {
         assert_eq!(response["error"]["param"], field);
         assert_eq!(response["error"]["code"], "unsupported_parameter");
     }
+}
+
+#[tokio::test]
+async fn stored_responses_are_retrievable_and_deletable() {
+    let fixture = fixture(10_000);
+    let request = json!({
+        "model": "mock-reasoner",
+        "input": "Which release should ship?",
+        "reasoning": {"effort": "medium", "summary": "auto"},
+        "store": true,
+        "metadata": {"suite": "persistence"}
+    });
+    let (status, _, text) = send(fixture.app.clone(), "POST", "/v1/responses", Some(request)).await;
+    assert_eq!(status, 200);
+    let created: Value = serde_json::from_str(&text).unwrap();
+    let id = created["id"].as_str().unwrap();
+
+    let (status, _, retrieved) = send(
+        fixture.app.clone(),
+        "GET",
+        &format!("/v1/responses/{id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(serde_json::from_str::<Value>(&retrieved).unwrap(), created);
+
+    let (status, _, deleted) = send(
+        fixture.app.clone(),
+        "DELETE",
+        &format!("/v1/responses/{id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        serde_json::from_str::<Value>(&deleted).unwrap(),
+        json!({"id": id, "object": "response", "deleted": true})
+    );
+
+    let (status, _, missing) = send(fixture.app, "GET", &format!("/v1/responses/{id}"), None).await;
+    assert_eq!(status, 404);
+    assert_eq!(
+        assert_error_envelope(&missing)["error"]["type"],
+        "invalid_request_error"
+    );
+}
+
+#[tokio::test]
+async fn stateless_responses_are_not_retrievable() {
+    let fixture = fixture(10_000);
+    let (status, _, text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": "Perform the disallowed deployment action."
+        })),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let created: Value = serde_json::from_str(&text).unwrap();
+
+    let (status, _, _) = send(
+        fixture.app,
+        "GET",
+        &format!("/v1/responses/{}", created["id"].as_str().unwrap()),
+        None,
+    )
+    .await;
+    assert_eq!(status, 404);
 }
 
 #[tokio::test]

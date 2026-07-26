@@ -14,13 +14,14 @@ use serde::Deserialize;
 use serde_yaml_ng::{Mapping, Value};
 
 /// Paths the mock implements, and therefore the only ones worth keeping.
-const KEEP_PATHS: [&str; 6] = [
+const KEEP_PATHS: [&str; 7] = [
     "/chat/completions",
     "/chat/completions/{completion_id}",
     "/chat/completions/{completion_id}/messages",
     "/models",
     "/models/{model}",
     "/responses",
+    "/responses/{response_id}",
 ];
 
 /// Schemas the mock asserts against even though the kept paths do not reference
