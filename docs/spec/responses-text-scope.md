@@ -127,6 +127,10 @@ and the parsed value separately so byte reconstruction and semantic validation r
   inspectable while making every continuation fail reproducibly with `previous_response_expired`;
   expiry never consults wall-clock time or mutates storage.
 - Process-local response and conversation stores have no implicit time- or capacity-based eviction.
+- A Response associated with a conversation commits only if the conversation still has the exact
+  item generation used to plan it. Overlapping writes may have one winner; every stale writer gets
+  `409 conversation_conflict` and must retry. No ordering is promised between distinct concurrent
+  requests. Sequential identical requests are separate turns and both succeed.
   Objects leave the store only through their typed delete route or `POST /_mock/reset`. Continuation
   cycles are structurally impossible because a child can only reference an already stored immutable
   predecessor, and conversation linkage cannot be combined with `previous_response_id`.

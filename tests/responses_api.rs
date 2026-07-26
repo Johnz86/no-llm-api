@@ -711,6 +711,152 @@ async fn conversation_resource_owns_an_automatically_appended_turn_log() {
 }
 
 #[tokio::test]
+async fn concurrent_conversation_writes_have_one_winner_and_explicit_conflicts() {
+    let fixture = fixture(100_000);
+    let (_, _, created) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/conversations",
+        Some(json!({"metadata": {"suite": "concurrency"}})),
+    )
+    .await;
+    let conversation: Value = serde_json::from_str(&created).unwrap();
+    let conversation_id = conversation["id"].as_str().unwrap().to_string();
+    let requests = (0..64).map(|index| {
+        let (input, case) = if index % 2 == 0 {
+            ("Introduce the simulator.", "basic-text/concise")
+        } else {
+            (
+                "Perform the disallowed deployment action.",
+                "response-refusal/policy-refusal",
+            )
+        };
+        send(
+            fixture.app.clone(),
+            "POST",
+            "/v1/responses",
+            Some(json!({
+                "model": "mock-gpt-4o",
+                "input": input,
+                "conversation": conversation_id,
+                "x_simulate": {"case": case}
+            })),
+        )
+    });
+    let results = futures::future::join_all(requests).await;
+    let successes: Vec<_> = results
+        .iter()
+        .filter(|(status, _, _)| *status == 200)
+        .collect();
+    assert_eq!(successes.len(), 1);
+    for (status, _, body) in results {
+        if status == 200 {
+            continue;
+        }
+        assert_eq!(status, 409, "{body}");
+        let error = assert_error_envelope(&body);
+        assert_eq!(error["error"]["param"], "conversation");
+        assert_eq!(error["error"]["code"], "conversation_conflict");
+    }
+
+    let (status, _, items) = send(
+        fixture.app,
+        "GET",
+        &format!("/v1/conversations/{conversation_id}/items?order=asc"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        serde_json::from_str::<Value>(&items).unwrap()["data"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn sixty_four_identical_conversation_writes_commit_once() {
+    let fixture = fixture(100_000);
+    let (_, _, created) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/conversations",
+        Some(json!({"metadata": {"suite": "identical-concurrency"}})),
+    )
+    .await;
+    let conversation: Value = serde_json::from_str(&created).unwrap();
+    let conversation_id = conversation["id"].as_str().unwrap().to_string();
+    let body = json!({
+        "model": "mock-gpt-4o",
+        "input": "Introduce the simulator.",
+        "conversation": conversation_id,
+        "x_simulate": {"case": "basic-text/concise"}
+    });
+    let results = futures::future::join_all((0..64).map(|_| {
+        send(
+            fixture.app.clone(),
+            "POST",
+            "/v1/responses",
+            Some(body.clone()),
+        )
+    }))
+    .await;
+    let success_bodies: std::collections::BTreeSet<_> = results
+        .iter()
+        .filter(|(status, _, _)| *status == 200)
+        .map(|(_, _, body)| body)
+        .collect();
+    assert_eq!(success_bodies.len(), 1);
+    assert_eq!(
+        results
+            .iter()
+            .filter(|(status, _, _)| *status == 409)
+            .count(),
+        63
+    );
+}
+
+#[tokio::test]
+async fn sequential_identical_conversation_requests_are_distinct_turns() {
+    let fixture = fixture(100_000);
+    let (_, _, created) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/conversations",
+        Some(json!({"metadata": {"suite": "sequential"}})),
+    )
+    .await;
+    let conversation: Value = serde_json::from_str(&created).unwrap();
+    let conversation_id = conversation["id"].as_str().unwrap();
+    let body = json!({
+        "model": "mock-gpt-4o",
+        "input": "Introduce the simulator.",
+        "conversation": conversation_id,
+        "x_simulate": {"case": "basic-text/concise"}
+    });
+    let mut ids = Vec::new();
+    for _ in 0..2 {
+        let (status, _, response) = send(
+            fixture.app.clone(),
+            "POST",
+            "/v1/responses",
+            Some(body.clone()),
+        )
+        .await;
+        assert_eq!(status, 200, "{response}");
+        ids.push(
+            serde_json::from_str::<Value>(&response).unwrap()["id"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+    }
+    assert_ne!(ids[0], ids[1]);
+}
+
+#[tokio::test]
 async fn conversation_and_predecessor_linkage_are_mutually_exclusive() {
     let fixture = fixture(10_000);
     let (status, _, text) = send(

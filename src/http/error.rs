@@ -13,12 +13,12 @@ use serde::Serialize;
 
 use crate::service::ServiceError;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ErrorEnvelope {
     pub error: ErrorBody,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ErrorBody {
     pub message: String,
     pub r#type: String,
@@ -27,7 +27,7 @@ pub struct ErrorBody {
 }
 
 /// An error paired with the status and headers it must be delivered with.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ApiError {
     pub status: StatusCode,
     pub body: ErrorBody,

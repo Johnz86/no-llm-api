@@ -165,6 +165,9 @@ impl ConversationStore {
         let Some(record) = guard.get_mut(id) else {
             return false;
         };
+        if generation != next_generation(record) {
+            return false;
+        }
         let inputs = response_input_items(request);
         for (index, (item, turn)) in inputs.into_iter().enumerate() {
             let item_id = input_item_id(&response.id, id, index, &item);

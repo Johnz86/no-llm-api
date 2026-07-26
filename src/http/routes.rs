@@ -574,6 +574,9 @@ async fn create_response(
     } else {
         None
     };
+    if conversation.is_some() {
+        tokio::task::yield_now().await;
+    }
     let controls = state
         .semantic
         .selection_controls(directive.case.clone(), directive.variant.clone());
@@ -616,13 +619,8 @@ async fn create_response(
         return Err(http_fault_error(&fault));
     }
     state.metrics.record_completion(request.stream);
-    if request.store {
-        let mut turns = canonical.turns.clone();
-        turns.push(response_turn(&response));
-        state.responses.save(response.clone(), turns).await;
-    }
     if let Some(conversation) = conversation {
-        state
+        let appended = state
             .conversations
             .append_response(
                 &conversation.resource.id,
@@ -632,6 +630,14 @@ async fn create_response(
                 response_turn(&response),
             )
             .await;
+        if !appended {
+            return Err(conversation_conflict(&conversation.resource.id));
+        }
+    }
+    if request.store {
+        let mut turns = canonical.turns.clone();
+        turns.push(response_turn(&response));
+        state.responses.save(response.clone(), turns).await;
     }
 
     let diagnostics = SemanticDiagnostics {
@@ -935,6 +941,18 @@ fn response_schema_error(message: &str) -> ApiError {
     ApiError::invalid_request(message)
         .with_param("text.format")
         .with_code("semantic_schema_error")
+}
+
+fn conversation_conflict(conversation_id: &str) -> ApiError {
+    ApiError::new(
+        StatusCode::CONFLICT,
+        format!(
+            "Conversation '{conversation_id}' changed while this response was being created; retry against the latest items."
+        ),
+        "invalid_request_error",
+    )
+    .with_param("conversation")
+    .with_code("conversation_conflict")
 }
 
 fn insert_semantic_headers(
