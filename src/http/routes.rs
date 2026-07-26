@@ -533,8 +533,14 @@ async fn create_response(
         .models
         .profile(&request.model)
         .ok_or_else(|| ApiError::model_not_found(&request.model))?;
+    let scenario = state.scenario.load_full();
     let mut canonical = request.canonical_request();
     let prior = if let Some(previous_response_id) = request.previous_response_id.as_deref() {
+        if scenario.state.expire_previous_response {
+            return Err(ApiError::not_found(previous_response_id)
+                .with_param("previous_response_id")
+                .with_code("previous_response_expired"));
+        }
         let stored = state
             .responses
             .get_stored(previous_response_id)
@@ -594,7 +600,6 @@ async fn create_response(
             })
             .unwrap_or(0),
     );
-    let scenario = state.scenario.load_full();
     let base = model_timing(&state, &request.model).unwrap_or_else(|| scenario.timing.clone());
     let effective_scenario = Scenario {
         timing: if scenario.timing == Timing::default() {

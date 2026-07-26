@@ -4,7 +4,7 @@ mod support;
 
 use serde_json::{Value, json};
 use support::sse::collect_sse_at;
-use support::{assert_error_envelope, fixture, send, send_with_headers};
+use support::{assert_error_envelope, fixture, fixture_with_scenario, send, send_with_headers};
 
 #[tokio::test]
 async fn explicit_text_plan_renders_a_response_message() {
@@ -191,6 +191,49 @@ async fn stored_responses_are_retrievable_and_deletable() {
 }
 
 #[tokio::test]
+async fn deleted_predecessors_cannot_be_continued() {
+    let fixture = fixture(10_000);
+    let (_, _, text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": "Summarize the release in one paragraph.",
+            "store": true
+        })),
+    )
+    .await;
+    let parent: Value = serde_json::from_str(&text).unwrap();
+    let parent_id = parent["id"].as_str().unwrap();
+    let (status, _, _) = send(
+        fixture.app.clone(),
+        "DELETE",
+        &format!("/v1/responses/{parent_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    let (status, _, text) = send(
+        fixture.app,
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": "Correction: use exactly five words.",
+            "previous_response_id": parent_id
+        })),
+    )
+    .await;
+    assert_eq!(status, 404);
+    assert_eq!(
+        assert_error_envelope(&text)["error"]["code"],
+        "previous_response_not_found"
+    );
+}
+
+#[tokio::test]
 async fn stateless_responses_are_not_retrievable() {
     let fixture = fixture(10_000);
     let (status, _, text) = send(
@@ -291,6 +334,56 @@ async fn continuation_requires_an_available_stored_predecessor() {
 }
 
 #[tokio::test]
+async fn state_expired_scenario_rejects_an_existing_predecessor_reproducibly() {
+    let fixture = fixture_with_scenario(
+        10_000,
+        no_llm_api::sim::scenario::Scenario::resolve("state-expired").unwrap(),
+    );
+    let (status, _, text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": "Summarize the release in one paragraph.",
+            "store": true
+        })),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let parent: Value = serde_json::from_str(&text).unwrap();
+    let parent_id = parent["id"].as_str().unwrap();
+
+    let (status, _, retrieved) = send(
+        fixture.app.clone(),
+        "GET",
+        &format!("/v1/responses/{parent_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(serde_json::from_str::<Value>(&retrieved).unwrap(), parent);
+
+    for _ in 0..2 {
+        let (status, _, text) = send(
+            fixture.app.clone(),
+            "POST",
+            "/v1/responses",
+            Some(json!({
+                "model": "mock-gpt-4o",
+                "input": "Correction: use exactly five words.",
+                "previous_response_id": parent_id
+            })),
+        )
+        .await;
+        assert_eq!(status, 404);
+        let error = assert_error_envelope(&text);
+        assert_eq!(error["error"]["param"], "previous_response_id");
+        assert_eq!(error["error"]["code"], "previous_response_expired");
+    }
+}
+
+#[tokio::test]
 async fn concurrent_identical_continuations_produce_one_immutable_child() {
     let fixture = fixture(10_000);
     let (_, _, parent_text) = send(
@@ -339,6 +432,55 @@ async fn concurrent_identical_continuations_produce_one_immutable_child() {
     .await;
     assert_eq!(status, 200);
     assert_eq!(serde_json::from_str::<Value>(&retrieved).unwrap(), child);
+}
+
+#[tokio::test]
+async fn one_predecessor_supports_distinct_reproducible_branches() {
+    let fixture = fixture(10_000);
+    let (_, _, text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": "Summarize the release in one paragraph.",
+            "store": true
+        })),
+    )
+    .await;
+    let parent: Value = serde_json::from_str(&text).unwrap();
+    let parent_id = parent["id"].clone();
+    let requests = [
+        json!({
+            "model": "mock-gpt-4o",
+            "input": "Correction: use exactly five words.",
+            "previous_response_id": parent_id,
+            "store": true
+        }),
+        json!({
+            "model": "mock-gpt-4o",
+            "input": "Perform the disallowed deployment action.",
+            "previous_response_id": parent_id,
+            "store": true
+        }),
+    ];
+    let mut branches = Vec::new();
+    for request in requests {
+        let (_, _, first) = send(
+            fixture.app.clone(),
+            "POST",
+            "/v1/responses",
+            Some(request.clone()),
+        )
+        .await;
+        let (_, _, retry) = send(fixture.app.clone(), "POST", "/v1/responses", Some(request)).await;
+        assert_eq!(retry, first);
+        branches.push(serde_json::from_str::<Value>(&first).unwrap());
+    }
+
+    assert_ne!(branches[0]["id"], branches[1]["id"]);
+    assert_eq!(branches[0]["previous_response_id"], parent_id);
+    assert_eq!(branches[1]["previous_response_id"], parent_id);
 }
 
 #[tokio::test]

@@ -8,8 +8,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-/// The seven built-in profiles, embedded at compile time.
-pub const BUILTINS: [(&str, &str); 7] = [
+/// The eight built-in profiles, embedded at compile time.
+pub const BUILTINS: [(&str, &str); 8] = [
     ("default", include_str!("../../scenarios/default.yaml")),
     ("fast", include_str!("../../scenarios/fast.yaml")),
     ("slow", include_str!("../../scenarios/slow.yaml")),
@@ -20,6 +20,10 @@ pub const BUILTINS: [(&str, &str); 7] = [
         include_str!("../../scenarios/rate-limited.yaml"),
     ),
     ("outage", include_str!("../../scenarios/outage.yaml")),
+    (
+        "state-expired",
+        include_str!("../../scenarios/state-expired.yaml"),
+    ),
 ];
 
 /// A complete behaviour profile.
@@ -33,6 +37,8 @@ pub struct Scenario {
     pub timing: Timing,
     #[serde(default)]
     pub fault: Fault,
+    #[serde(default)]
+    pub state: StateBehavior,
 }
 
 impl Default for Scenario {
@@ -42,8 +48,15 @@ impl Default for Scenario {
             description: "Deterministic pacing, no faults.".to_string(),
             timing: Timing::default(),
             fault: Fault::default(),
+            state: StateBehavior::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct StateBehavior {
+    pub expire_previous_response: bool,
 }
 
 /// Pacing knobs. `None` means "inherit the server-wide setting".

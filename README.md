@@ -95,7 +95,8 @@ Every setting is a flag with an environment fallback. `no-llm-api --help` is the
 
 ## Scenarios
 
-A scenario is a behaviour profile: pacing and failure injection. Seven are built in, and
+A scenario is a behaviour profile: pacing, failure injection, and deterministic state behavior.
+Eight are built in, and
 `--scenario ./my-profile.yaml` loads one from disk.
 
 | Name | Behaviour |
@@ -107,6 +108,7 @@ A scenario is a behaviour profile: pacing and failure injection. Seven are built
 | `flaky` | Half of all streams die mid-flight with an error frame, then `[DONE]`. |
 | `rate-limited` | Every request answers `429` with `Retry-After`. |
 | `outage` | Every request answers `503`. |
+| `state-expired` | Stored predecessors remain inspectable but continuation treats them as expired. |
 
 Per-request overrides beat the scenario, which makes parallel tests safe. Send an `X-Simulate-*`
 header or an `x_simulate` object in the request body:

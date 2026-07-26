@@ -20,12 +20,13 @@ cancellation. Authored fixtures cover refusal plus completed, incomplete, failed
 lifecycles, while endpoint tests cover staged errors, deliberate drops, and consumer cancellation.
 The locked official client reconstructs text, public summaries, structured output, and refusals from
 events. Responses output budgets consume reasoning before visible output, use tokenizer-derived
-usage, and terminate incomplete streams through the same event state machine. Milestones T5 and T6
-remain in progress/future work. T5 currently provides immutable process-local storage, retrieval,
-deletion, and counter-free `previous_response_id` continuation with cumulative input accounting;
-the redacted control-plane state view is sorted by response id, and reset clears all process-local
-Responses state. Deterministic conversation resources own automatically appended response turn
-logs; conversation item routes and tools are not implemented yet.
+usage, and terminate incomplete streams through the same event state machine. Milestones T0 through
+T5 are complete; T6 remains future work. T5 provides immutable process-local storage, retrieval,
+deletion, counter-free `previous_response_id` continuation, deterministic branching, cumulative
+input accounting, redacted diagnostics, reset semantics, and explicit scenario-driven expiry.
+Conversation resources own typed item logs with deterministic batching, pagination, item lifecycle,
+semantic deletion, and automatic Response input/reasoning/output ownership. Tool items remain beyond
+this text-first plan.
 
 The first future delivery stays text-first. It establishes the shared item model, deterministic
 reasoning policy, state transitions, scenario vocabulary, and validation rules that later tool,
@@ -577,11 +578,10 @@ Exit: streamed and non-streamed semantic objects are equivalent for the full sce
 
 ### T5: Continuation and conversation state
 
-Status: immutable process-local response storage, retrieval, deletion, and deterministic predecessor
-continuation complete. Redacted diagnostics and reset semantics are complete; conversation logs,
-resource lifecycle, deterministic exchange ordering, and automatic turn appends are complete.
-Conversation item creation, listing, retrieval, deletion, pagination, and deterministic retry
-semantics are complete. Explicit expiry remains pending.
+Status: complete. Immutable response storage, deterministic predecessor continuation and branching,
+redacted diagnostics, reset/deletion failures, scenario-driven expiry, conversation item lifecycle,
+pagination, retry semantics, deterministic exchange ordering, and automatic item ownership are all
+covered by endpoint tests. The locked official client verifies both resource families.
 
 - add response store, `previous_response_id`, conversation logs, replayed items, reset/deletion,
   deterministic expiry scenarios, branching, and concurrency semantics;

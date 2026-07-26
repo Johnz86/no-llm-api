@@ -11,7 +11,7 @@ strict structured-output, and refusal streams in `e2e/responses-client.spec.ts`.
 includes the SDK-required `output_text` aggregation and standard response members in addition to
 the frozen minimal corpus. The same client verifies immutable stored-response retrieval, deletion,
 the common not-found error path, a linked two-turn `previous_response_id` continuation, and
-conversation resource creation, retrieval, Response association, and deletion.
+conversation resource and item creation, pagination, retrieval, Response association, and deletion.
 
 The contract is pinned to the OpenAI OpenAPI document at commit
 `5c044be3bf3a42854e99e34616564eeb2124a317` from 2026-07-23, full-document SHA-256
@@ -123,7 +123,13 @@ and the parsed value separately so byte reconstruction and semantic validation r
   canonical turns are prepended for semantic matching and its complete public object participates
   in child plan identity, so branches require no counters or request ordering. Missing and deleted
   predecessors fail before planning with `previous_response_not_found`. A `store: false` response
-  is stateless and cannot be referenced by id.
+  is stateless and cannot be referenced by id. The `state-expired` scenario keeps stored objects
+  inspectable while making every continuation fail reproducibly with `previous_response_expired`;
+  expiry never consults wall-clock time or mutates storage.
+- Process-local response and conversation stores have no implicit time- or capacity-based eviction.
+  Objects leave the store only through their typed delete route or `POST /_mock/reset`. Continuation
+  cycles are structurally impossible because a child can only reference an already stored immutable
+  predecessor, and conversation linkage cannot be combined with `previous_response_id`.
 - Explicit case and variant selection is a public mock-only test control through
   `X-Simulate-Case`, `X-Simulate-Variant`, and matching `x_simulate` request members. It never skips
   protocol validation and never exists on a proxied upstream request.
