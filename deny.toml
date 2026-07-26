@@ -3,6 +3,10 @@ all-features = true
 
 [advisories]
 yanked = "warn"
+ignore = [
+    # parquet 59 still depends on paste 1.0.15; no safe upgrade exists.
+    "RUSTSEC-2024-0436",
+]
 
 [licenses]
 allow = [
@@ -14,9 +18,10 @@ allow = [
     "ISC",
     "Unicode-3.0",
     "Zlib",
-    "MPL-2.0",
     "CDLA-Permissive-2.0",
+    "CC0-1.0",
 ]
+private = { ignore = true }
 
 [bans]
 multiple-versions = "warn"

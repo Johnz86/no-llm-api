@@ -267,6 +267,11 @@ origin and the requested headers, so SDK-specific headers never need an allow-li
 - `tests/support/sse.rs` is the shared transcript parser and assertion harness: exactly one trailing
   `[DONE]`, one `finish_reason` on the last chunk carrying a choice, stable chunk ids, usage-frame
   position, and median inter-frame pacing.
+- `npm --prefix e2e test` starts the server and drives the embedded page in Chromium. It verifies
+  incremental rendering, the exact final fixture text, browser-console hygiene, and API-error display.
+  Install the browser once with `npx --prefix e2e playwright install chromium`.
+- `no-llm-api health --url http://127.0.0.1:8080/ready` is the dependency-free readiness probe
+  used by the distroless image, where `curl` is unavailable.
 
 ## Notes
 

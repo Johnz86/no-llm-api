@@ -6,6 +6,7 @@
 - Live proxying is behind the `live` feature. The default build links no HTTP client, so `cargo tree --edges normal` must stay free of `reqwest`, `rustls` and `async-openai`; keep it that way.
 - Fixture conversations live in `fixtures/*.yaml` and compile to parquet with `cargo run --bin fixtures -- build --force`; the linter rejects unknown fields, so a typo fails the build. Behaviour profiles live in `scenarios/*.yaml` and are embedded with `include_str!`. Adding one means adding it to `sim::scenario::BUILTINS` and to the README table, which `tests/docs.rs` enforces.
 - Module-level unit tests live in inline `#[cfg(test)]` blocks. Cross-module and client-contract tests live in `tests/`; `tests/support/` holds the shared fixture builder and the SSE transcript harness.
+- Browser integration tests live in `e2e/` and run separately with `npm --prefix e2e test`; they are never part of `cargo test`.
 - Generated parquet fixtures reside under `data/` (created on demand). Keep additional scripted datasets there to avoid polluting `src/`.
 - Plans and design notes live in `docs/`; start at `docs/plans/00-roadmap.md`. The distilled Chat Completions contract is `docs/spec/chat-completions-scope.md`.
 - The tracked spec reference is `docs/spec/chat-completions.openapi.yaml`, a generated 144 KB extract of the paths this mock implements plus their schemas. Regenerate it with `cargo run --bin spec_extract` after refreshing the full upstream document with `scripts/fetch-openapi.ps1` (or `.sh`); `openapi.yaml` itself is gitignored. Never hand-edit either file, and check `openapi.provenance.json` rather than upstream's `info.version`, which never moves. See `docs/spec/upstream-openapi.md`.
@@ -31,6 +32,7 @@
 - Selection and identity must stay pure functions of the request. No counters, no wall clock, no `DefaultHasher`: `tests/determinism.rs` asserts 64 concurrent identical requests produce exactly one distinct body.
 - Snapshots in `tests/snapshots/` are unredacted on purpose. Review a diff before accepting it with `cargo insta accept`; a change there means the bytes a GUI sees changed.
 - Timing assertions use the median inter-frame gap with wide tolerance (`tests/sse.rs`). Do not assert exact sleeps.
+- Browser tests use Playwright's managed server and Chromium. Assert incremental text, final fixture content, and console errors rather than fixed rendering delays.
 
 ## Commit & Pull Request Guidelines
 - Write imperative, 72-character subject lines (e.g., `Add streaming error handling`).

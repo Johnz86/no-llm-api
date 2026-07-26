@@ -14,6 +14,7 @@ RUN mkdir -p src/bin \
 
 COPY src ./src
 COPY scenarios ./scenarios
+COPY fixtures ./fixtures
 COPY index.html ./index.html
 # Touch so cargo rebuilds the real sources rather than reusing the stub.
 RUN touch src/main.rs src/lib.rs \
@@ -36,4 +37,6 @@ ENV BIND_ADDRESS=0.0.0.0:8080 \
 
 EXPOSE 8080
 USER nonroot:nonroot
+HEALTHCHECK --interval=10s --timeout=3s --start-period=2s --retries=3 \
+    CMD ["/app/no-llm-api", "health", "--url", "http://127.0.0.1:8080/ready"]
 ENTRYPOINT ["/app/no-llm-api"]

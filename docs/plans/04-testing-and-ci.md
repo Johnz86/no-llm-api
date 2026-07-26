@@ -406,3 +406,6 @@ Never run locally as part of the normal loop (costs money, hits the network):
 | 10 | Update `AGENTS.md` testing convention + README testing section | Contributors currently get contradictory instructions | `AGENTS.md`, `README.md` | S | Both documents describe the section-0 table and the single `NO_LLM_API_LIVE` gate |
 | 11 | Determinism hooks (`with_seed` id/clock injection) and seeded fallback selection, then replace insta redactions | Snapshots and GUI regression runs need byte-stable output; `service.rs:43-49` is nondeterministic under concurrency | `src/service.rs`, `tests/snapshots.rs` | M | Two identical requests to a seeded service produce byte-identical bodies including `id`/`created`; 20 concurrent unmatched prompts return the same sequence on every run |
 | 12 | Playwright `e2e/` project driving `index.html` | Catches integration breakage no Rust test sees (CORS, SSE framing in the browser, incremental render) | new `e2e/package.json`, `e2e/playwright.config.ts`, `e2e/chat.spec.ts` | M | `npm --prefix e2e test` boots the server via `webServer`, asserts streamed text grows then equals the scripted answer, and asserts zero console errors |
+
+Item 12 is complete. The suite also intercepts a spec-shaped HTTP failure and verifies that the
+embedded client displays its message rather than feeding the JSON error envelope to the SSE parser.

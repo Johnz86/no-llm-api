@@ -51,6 +51,54 @@ jobs:
       - run: cargo test --locked --all-targets
       - run: cargo test --locked --doc
 
+  browser-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - run: npm ci --prefix e2e
+      - run: npx --prefix e2e playwright install --with-deps chromium
+      - run: npm --prefix e2e test
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: e2e/test-results/
+          if-no-files-found: ignore
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: no-llm-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - run: |
+          docker run --detach --read-only --name no-llm-api-ci -p 127.0.0.1:8080:8080 no-llm-api:ci
+          for attempt in $(seq 1 30); do
+            if docker exec no-llm-api-ci /app/no-llm-api health --url http://127.0.0.1:8080/ready; then
+              curl --fail --silent http://127.0.0.1:8080/ > /dev/null
+              curl --fail --silent http://127.0.0.1:8080/ready > /dev/null
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs no-llm-api-ci
+          exit 1
+      - if: always()
+        run: docker rm --force no-llm-api-ci || true
+
   deny:
     runs-on: ubuntu-latest
     steps:

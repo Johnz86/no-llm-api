@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 
-use clap::{Parser, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -20,6 +20,9 @@ use thiserror::Error;
     version
 )]
 pub struct Cli {
+    #[command(subcommand)]
+    pub command: Option<Command>,
+
     /// Address to bind the HTTP listener to.
     #[arg(long, env = "BIND_ADDRESS", default_value = "127.0.0.1:8080")]
     pub bind_address: SocketAddr,
@@ -113,6 +116,19 @@ pub struct Cli {
     /// Print the resolved configuration as JSON and exit.
     #[arg(long)]
     pub print_config: bool,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum Command {
+    /// Probe an HTTP readiness endpoint without requiring curl.
+    Health(HealthArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct HealthArgs {
+    /// Readiness URL to probe.
+    #[arg(long, default_value = "http://127.0.0.1:8080/ready")]
+    pub url: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize)]

@@ -34,9 +34,9 @@ Verification baseline: `ASYNC_OPENAI_COMPAT=1 cargo test` passes; note this repo
 
 ## Delivered so far
 
-M1-M4 are complete and M5 is largely done. Verified with `cargo test` (196 test results, no
-environment variables, no network) on both the default and `live` feature sets,
-`cargo clippy --all-targets -- -D warnings` on both, a running server, and a distroless container.
+M1-M5 are complete. Verified with `cargo test` (196 test results, no environment variables, no
+network) on both the default and `live` feature sets, `cargo clippy --all-targets -- -D warnings`,
+the Playwright browser suite, a running server, and a distroless container.
 
 | Commit | Milestone | Items |
 | --- | --- | --- |
@@ -55,9 +55,12 @@ environment variables, no network) on both the default and `live` feature sets,
 | `47b7183` | M4 | R35 |
 | `de86d6d` | M4 | R36, R37 |
 | `fe06e51` | M5 | R47 |
+| `8b92279` | M5 | R46 |
+| current change | M5 | R48 |
 
-Still open: R48 (Playwright e2e). R46 is complete in the current change; it replaces the tracked
-full OpenAPI document with a generated, self-contained extract and stable plan citations.
+All roadmap items are delivered. R48 drives the embedded page in Chromium, verifies that streamed
+text grows before reaching the exact fixture answer, checks browser-console hygiene, and covers
+spec-shaped HTTP error display. It remains separate from `cargo test` and runs in its own CI job.
 
 ## Critical path
 
@@ -131,7 +134,7 @@ the row; more than one source means the proposals were merged here.
 | R45 | ~~Doc reconciliation: delete `GEMINI.md`, archive `task.md`, promote `chat_completions_scope.md` to `docs/spec/`, fix two stale `AGENTS.md` claims, add the testing-layout rule, README env/CLI table and drift test~~ | 05#11, 04#10 | S | M5 | R24 |
 | R46 | ~~OpenAPI slimming: track a pruned chat-completions extract, untrack the full `openapi.yaml`, add `scripts/fetch-openapi.*` with pinned sha256, drop `openai-func-enums/`~~ (see decision D10) | 05#12 | S | M5 | - |
 | R47 | Release plumbing: `CHANGELOG.md` with a Wire-behaviour section, `docs/versioning.md`, `x-no-llm-api-version` header, release workflow (5 targets + GHCR), crates.io metadata | 05#15 | M | M5 | R43 |
-| R48 | Playwright `e2e/` driving `index.html` (never part of `cargo test`) | 04#12 | M | M5 | R6 |
+| R48 | ~~Playwright `e2e/` driving `index.html` (never part of `cargo test`)~~ | 04#12 | M | M5 | R6 |
 | R49 | `--metrics` with six hand-rolled Prometheus counters | 05#14 | S | M5 | R39 |
 | R50 | Accept-and-ignore remaining spec request fields (`logprobs`, `top_logprobs`, `prediction`, `web_search_options`, `verbosity`, `prompt_cache_key`, `safety_identifier`, `functions`, `include_obfuscation`) | 01D3 | S | M5 | R31 |
 

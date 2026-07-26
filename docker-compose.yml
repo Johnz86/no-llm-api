@@ -18,7 +18,7 @@ services:
       - ALL
     healthcheck:
       # The image is distroless, so the binary itself is the probe.
-      test: ["CMD", "/app/no-llm-api", "--print-config"]
+      test: ["CMD", "/app/no-llm-api", "health", "--url", "http://127.0.0.1:8080/ready"]
       interval: 10s
       timeout: 3s
       retries: 3

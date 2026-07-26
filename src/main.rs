@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Parser;
-use no_llm_api::config::{Cli, DatasetSettings, IdentityModeArg, Settings};
+use no_llm_api::config::{Cli, Command, DatasetSettings, IdentityModeArg, Settings};
 use no_llm_api::dataset::{self, ConversationScripts};
 use no_llm_api::http::{RouterOptions, build_router_with_options};
 use no_llm_api::models::ModelCatalogue;
@@ -16,6 +16,10 @@ use tokio::net::TcpListener;
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     let cli = Cli::parse();
+    if let Some(Command::Health(args)) = &cli.command {
+        probe_health(&args.url)?;
+        return Ok(());
+    }
     let print_config = cli.print_config;
     let settings = Settings::resolve(cli)?;
 
@@ -76,6 +80,45 @@ async fn main() -> Result<()> {
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+    Ok(())
+}
+
+fn probe_health(url: &str) -> Result<()> {
+    use std::io::{Read, Write};
+    use std::net::{TcpStream, ToSocketAddrs};
+    use std::time::Duration;
+
+    let target = url
+        .strip_prefix("http://")
+        .ok_or_else(|| anyhow::anyhow!("health URL must start with http://"))?;
+    let (authority, path) = target
+        .split_once('/')
+        .map_or((target, ""), |(authority, path)| (authority, path));
+    let address = if authority.contains(':') {
+        authority.to_owned()
+    } else {
+        format!("{authority}:80")
+    };
+    let socket = address
+        .to_socket_addrs()?
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("health URL did not resolve"))?;
+    let timeout = Duration::from_secs(2);
+    let mut stream = TcpStream::connect_timeout(&socket, timeout)?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
+    write!(
+        stream,
+        "GET /{path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n"
+    )?;
+
+    let mut response = [0_u8; 256];
+    let read = stream.read(&mut response)?;
+    let status = String::from_utf8_lossy(&response[..read]);
+    let status_line = status.lines().next().unwrap_or_default();
+    if !status_line.contains(" 200 ") {
+        anyhow::bail!("health probe failed: {status_line}");
+    }
     Ok(())
 }
 

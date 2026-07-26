@@ -50,6 +50,9 @@ configuration surface moved.
 - A distroless container image plus `docker-compose.yml` (Open WebUI) and
   `docker-compose.demo.yml`.
 - `x-no-llm-api-version` on every response, and `--print-config`.
+- A Playwright browser suite that boots the server and verifies incremental SSE rendering and
+  spec-shaped error display in the embedded demo page.
+- A dependency-free `health --url` command and container healthcheck suitable for the distroless image.
 
 ### Changed
 
@@ -68,3 +71,8 @@ configuration surface moved.
   channel.
 - `regenerate_dataset` silently did nothing when the target existed; it now takes
   `--force` and refuses otherwise.
+- The embedded demo now checks HTTP status and stream presence, drains the final decoder bytes,
+  and displays the API error message instead of attempting to parse error JSON as SSE.
+- The Docker build now includes the YAML files embedded by the fixture module.
+- The dependency-policy configuration now handles the intentionally private root crate, Arrow's
+  CC0 dependency, and Parquet's unavoidable archived `paste` dependency explicitly.

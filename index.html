@@ -135,13 +135,46 @@
                         }),
                     });
 
+                    if (!response.ok) {
+                        const errorBody = await response.json().catch(() => null);
+                        const message = errorBody?.error?.message || `${response.status} ${response.statusText}`;
+                        throw new Error(message);
+                    }
+
+                    if (!response.body) {
+                        throw new Error('The response did not contain a stream.');
+                    }
+
                     const reader = response.body.getReader();
                     const decoder = new TextDecoder();
                     let buffer = '';
 
+                    const processLine = (line) => {
+                        if (!line.startsWith('data:')) return false;
+
+                        const data = line.substring(5).trim();
+                        if (data === '[DONE]') return true;
+
+                        try {
+                            const chunk = JSON.parse(data);
+                            const content = chunk.choices?.[0]?.delta?.content;
+                            if (content) {
+                                assistantMessageElement.textContent += content;
+                                chatMessages.scrollTop = chatMessages.scrollHeight;
+                            }
+                        } catch (error) {
+                            console.error('Error parsing stream data:', error);
+                        }
+                        return false;
+                    };
+
                     while (true) {
                         const { done, value } = await reader.read();
-                        if (done) break;
+                        if (done) {
+                            buffer += decoder.decode();
+                            if (buffer && processLine(buffer)) return;
+                            break;
+                        }
 
                         buffer += decoder.decode(value, { stream: true });
                         
@@ -149,26 +182,12 @@
                         buffer = lines.pop(); 
 
                         for (const line of lines) {
-                            if (line.startsWith('data:')) {
-                                const data = line.substring(5).trim();
-                                if (data === '[DONE]') {
-                                    return;
-                                }
-                                try {
-                                    const chunk = JSON.parse(data);
-                                    if (chunk.choices && chunk.choices[0].delta.content) {
-                                        assistantMessageElement.textContent += chunk.choices[0].delta.content;
-                                        chatMessages.scrollTop = chatMessages.scrollHeight;
-                                    }
-                                } catch (error) {
-                                    console.error('Error parsing stream data:', error);
-                                }
-                            }
+                            if (processLine(line)) return;
                         }
                     }
                 } catch (error) {
                     console.error('Error fetching chat completion:', error);
-                    assistantMessageElement.textContent = 'Error: Could not connect to the service.';
+                    assistantMessageElement.textContent = `Error: ${error.message || 'Could not connect to the service.'}`;
                 }
             };
 
