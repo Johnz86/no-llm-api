@@ -843,6 +843,34 @@ fn validate_response_request(request: &CreateResponseRequest) -> Result<(), ApiE
         )
         .with_param("input"));
     }
+    if let ResponseInput::Items(items) = &request.input
+        && items.iter().any(|item| match item {
+            crate::responses::ResponseInputItem::Message { content, .. } => content.is_empty(),
+        })
+    {
+        return Err(ApiError::invalid_request(
+            "Invalid value for 'input': message content must not be empty.",
+        )
+        .with_param("input"));
+    }
+    if request.metadata.len() > 16 {
+        return Err(ApiError::invalid_request(
+            "Invalid value for 'metadata': at most 16 entries are allowed.",
+        )
+        .with_param("metadata")
+        .with_code("invalid_value"));
+    }
+    if let Some((key, _)) = request
+        .metadata
+        .iter()
+        .find(|(key, value)| key.chars().count() > 64 || value.chars().count() > 512)
+    {
+        return Err(ApiError::invalid_request(format!(
+            "Invalid metadata entry '{key}': keys are limited to 64 characters and values to 512 characters."
+        ))
+        .with_param("metadata")
+        .with_code("invalid_value"));
+    }
     if !request.tools.is_empty() {
         return Err(ApiError::invalid_request(
             "Responses tools are not implemented in this release.",

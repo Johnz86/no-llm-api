@@ -342,14 +342,14 @@
           }
         ],
         "output_text": "Ship release B.",
-        "parallel_tool_calls": false,
+        "parallel_tool_calls": true,
         "previous_response_id": null,
         "reasoning": {
           "effort": "high",
           "summary": "auto"
         },
         "status": "completed",
-        "store": false,
+        "store": true,
         "temperature": null,
         "text": {
           "format": {
@@ -425,14 +425,14 @@
       }
     ],
     "output_text": "Ship release B.",
-    "parallel_tool_calls": false,
+    "parallel_tool_calls": true,
     "previous_response_id": null,
     "reasoning": {
       "effort": "high",
       "summary": "auto"
     },
     "status": "completed",
-    "store": false,
+    "store": true,
     "temperature": null,
     "text": {
       "format": {

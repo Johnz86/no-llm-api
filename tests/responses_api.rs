@@ -38,6 +38,87 @@ async fn explicit_text_plan_renders_a_response_message() {
 }
 
 #[tokio::test]
+async fn spec_defaults_empty_text_config_and_instructions_round_trip() {
+    let fixture = fixture(10_000);
+    let request = json!({
+        "model": "mock-gpt-4o",
+        "instructions": "Answer in one sentence.",
+        "input": "Introduce the simulator.",
+        "text": {},
+        "x_simulate": {"case": "basic-text/concise"}
+    });
+    let (status, _, body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(request.clone()),
+    )
+    .await;
+
+    assert_eq!(status, 200, "{body}");
+    let response: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(response["instructions"], "Answer in one sentence.");
+    assert_eq!(response["store"], true);
+    assert_eq!(response["parallel_tool_calls"], true);
+    assert_eq!(response["text"]["format"]["type"], "text");
+
+    let mut without_instructions = request;
+    without_instructions
+        .as_object_mut()
+        .unwrap()
+        .remove("instructions");
+    let (_, _, body) = send(
+        fixture.app,
+        "POST",
+        "/v1/responses",
+        Some(without_instructions),
+    )
+    .await;
+    let other: Value = serde_json::from_str(&body).unwrap();
+    assert_ne!(response["id"], other["id"]);
+}
+
+#[tokio::test]
+async fn response_metadata_enforces_the_pinned_string_map_limits() {
+    let cases = [
+        (
+            (0..17)
+                .map(|index| (format!("key-{index}"), json!("value")))
+                .collect::<serde_json::Map<_, _>>(),
+            400,
+        ),
+        (
+            [("k".repeat(65), json!("value"))].into_iter().collect(),
+            400,
+        ),
+        (
+            [("key".to_string(), json!("v".repeat(513)))]
+                .into_iter()
+                .collect(),
+            400,
+        ),
+        ([("key".to_string(), json!(42))].into_iter().collect(), 400),
+    ];
+    for (metadata, expected) in cases {
+        let fixture = fixture(10_000);
+        let (status, _, body) = send(
+            fixture.app,
+            "POST",
+            "/v1/responses",
+            Some(json!({
+                "model": "mock-gpt-4o",
+                "input": "Introduce the simulator.",
+                "metadata": metadata,
+                "x_simulate": {"case": "basic-text/concise"}
+            })),
+        )
+        .await;
+        assert_eq!(status.as_u16(), expected, "{body}");
+        assert_error_envelope(&body);
+    }
+}
+
+#[tokio::test]
 async fn reasoning_summary_is_public_but_chat_trace_is_absent() {
     let fixture = fixture(1_000);
     let body = json!({
@@ -242,7 +323,8 @@ async fn stateless_responses_are_not_retrievable() {
         "/v1/responses",
         Some(json!({
             "model": "mock-gpt-4o",
-            "input": "Perform the disallowed deployment action."
+            "input": "Perform the disallowed deployment action.",
+            "store": false
         })),
     )
     .await;

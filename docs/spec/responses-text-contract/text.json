@@ -261,11 +261,11 @@
           }
         ],
         "output_text": "no-llm-api replays deterministic, authored model outcomes for client development.",
-        "parallel_tool_calls": false,
+        "parallel_tool_calls": true,
         "previous_response_id": null,
         "reasoning": null,
         "status": "completed",
-        "store": false,
+        "store": true,
         "temperature": null,
         "text": {
           "format": {
@@ -337,11 +337,11 @@
       }
     ],
     "output_text": "no-llm-api replays deterministic, authored model outcomes for client development.",
-    "parallel_tool_calls": false,
+    "parallel_tool_calls": true,
     "previous_response_id": null,
     "reasoning": null,
     "status": "completed",
-    "store": false,
+    "store": true,
     "temperature": null,
     "text": {
       "format": {

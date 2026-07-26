@@ -1,7 +1,9 @@
 //! Typed request and response vocabulary for the experimental Responses surface.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use tiktoken_rs::CoreBPE;
 
 use crate::request_types::ReasoningEffort;
@@ -19,6 +21,8 @@ pub struct CreateResponseRequest {
     pub model: String,
     pub input: ResponseInput,
     #[serde(default)]
+    pub instructions: Option<String>,
+    #[serde(default)]
     pub reasoning: Option<ResponseReasoningConfig>,
     #[serde(default)]
     pub text: Option<ResponseTextConfig>,
@@ -26,15 +30,15 @@ pub struct CreateResponseRequest {
     pub max_output_tokens: Option<u32>,
     #[serde(default)]
     pub stream: bool,
-    #[serde(default)]
+    #[serde(default = "default_true", deserialize_with = "bool_or_default_true")]
     pub store: bool,
-    #[serde(default)]
-    pub metadata: Map<String, Value>,
+    #[serde(default, deserialize_with = "metadata_or_default")]
+    pub metadata: BTreeMap<String, String>,
     #[serde(default)]
     pub previous_response_id: Option<String>,
     #[serde(default)]
     pub conversation: Option<ResponseConversationParam>,
-    #[serde(default)]
+    #[serde(default = "default_true", deserialize_with = "bool_or_default_true")]
     pub parallel_tool_calls: bool,
     #[serde(default)]
     pub tools: Vec<Value>,
@@ -118,6 +122,7 @@ pub enum ReasoningSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ResponseTextConfig {
+    #[serde(default)]
     pub format: ResponseTextFormat,
 }
 
@@ -144,6 +149,12 @@ pub enum ResponseTextFormat {
     },
 }
 
+impl Default for ResponseTextFormat {
+    fn default() -> Self {
+        Self::Text
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct ResponseObject {
     pub id: String,
@@ -154,7 +165,7 @@ pub struct ResponseObject {
     pub status: ResponseStatus,
     pub error: Option<Value>,
     pub incomplete_details: Option<Value>,
-    pub instructions: Option<Value>,
+    pub instructions: Option<String>,
     pub max_output_tokens: Option<u32>,
     pub model: String,
     pub output: Vec<ResponseOutputItem>,
@@ -169,7 +180,7 @@ pub struct ResponseObject {
     pub tools: Vec<Value>,
     pub top_p: Option<f32>,
     pub usage: ResponseUsage,
-    pub metadata: Map<String, Value>,
+    pub metadata: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -426,7 +437,7 @@ pub fn render_response_with_context(
         status,
         error: response_error(status),
         incomplete_details: incomplete_details(status),
-        instructions: None,
+        instructions: request.instructions.clone(),
         max_output_tokens: request.max_output_tokens,
         model: request.model.clone(),
         output,
@@ -637,16 +648,72 @@ impl CreateResponseRequest {
     }
 
     pub(crate) fn canonical_turns(&self) -> Vec<CanonicalTurn> {
-        match &self.input {
+        let input = match &self.input {
             ResponseInput::Text(text) => vec![canonical_turn("user", text)],
             ResponseInput::Items(items) => items
                 .iter()
                 .map(|item| match item {
                     ResponseInputItem::Message { role, content } => {
-                        canonical_turn(role.as_str(), &content.text())
+                        canonical_content_turn(role.as_str(), content)
                     }
                 })
                 .collect(),
+        };
+        self.instructions
+            .iter()
+            .map(|instructions| canonical_turn("developer", instructions))
+            .chain(input)
+            .collect()
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn bool_or_default_true<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<bool>::deserialize(deserializer)?.unwrap_or(true))
+}
+
+fn metadata_or_default<'de, D>(deserializer: D) -> Result<BTreeMap<String, String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<BTreeMap<String, String>>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+fn canonical_content_turn(role: &str, content: &ResponseInputContent) -> CanonicalTurn {
+    let content = match content {
+        ResponseInputContent::Text(text) => CanonicalContent::Text(text.clone()),
+        ResponseInputContent::Parts(parts) => CanonicalContent::Parts(
+            serde_json::to_value(parts).expect("Responses input parts serialize"),
+        ),
+    };
+    CanonicalTurn {
+        role: role.to_string(),
+        content,
+        name: None,
+        tool_call_id: None,
+        tool_calls: None,
+        function_call: None,
+        audio: None,
+        refusal: None,
+    }
+}
+
+impl ResponseInputContent {
+    pub(crate) fn is_empty(&self) -> bool {
+        match self {
+            Self::Text(text) => text.is_empty(),
+            Self::Parts(parts) => {
+                parts.is_empty()
+                    || parts.iter().all(|part| match part {
+                        ResponseInputPart::InputText { text } => text.is_empty(),
+                    })
+            }
         }
     }
 }
@@ -658,20 +725,6 @@ impl ResponseRole {
             Self::Assistant => "assistant",
             Self::System => "system",
             Self::Developer => "developer",
-        }
-    }
-}
-
-impl ResponseInputContent {
-    fn text(&self) -> String {
-        match self {
-            Self::Text(text) => text.clone(),
-            Self::Parts(parts) => parts
-                .iter()
-                .map(|part| match part {
-                    ResponseInputPart::InputText { text } => text.as_str(),
-                })
-                .collect(),
         }
     }
 }
@@ -692,7 +745,7 @@ fn canonical_turn(role: &str, text: &str) -> CanonicalTurn {
 pub(crate) fn canonical_input_item(item: &ResponseInputItem) -> CanonicalTurn {
     match item {
         ResponseInputItem::Message { role, content } => {
-            canonical_turn(role.as_str(), &content.text())
+            canonical_content_turn(role.as_str(), content)
         }
     }
 }
@@ -771,6 +824,59 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn omitted_and_null_persistence_controls_use_spec_defaults() {
+        for body in [
+            serde_json::json!({"model": "mock-gpt-4o", "input": "hello"}),
+            serde_json::json!({
+                "model": "mock-gpt-4o",
+                "input": "hello",
+                "store": null,
+                "parallel_tool_calls": null,
+                "metadata": null,
+                "text": {}
+            }),
+        ] {
+            let request: CreateResponseRequest = serde_json::from_value(body).unwrap();
+            assert!(request.store);
+            assert!(request.parallel_tool_calls);
+            assert_eq!(
+                request.text.unwrap_or_default().format,
+                ResponseTextFormat::Text
+            );
+        }
+    }
+
+    #[test]
+    fn instructions_and_input_part_boundaries_are_canonical() {
+        let request = |parts: &[&str]| {
+            serde_json::from_value::<CreateResponseRequest>(serde_json::json!({
+                "model": "mock-gpt-4o",
+                "instructions": "Be exact.",
+                "input": [{
+                    "type": "message",
+                    "role": "user",
+                    "content": parts.iter().map(|text| serde_json::json!({
+                        "type": "input_text",
+                        "text": text
+                    })).collect::<Vec<_>>()
+                }]
+            }))
+            .unwrap()
+            .canonical_request()
+        };
+        let first = request(&["ab", "c"]);
+        let second = request(&["a", "bc"]);
+
+        assert_eq!(first.turns[0].role, "developer");
+        assert_eq!(
+            first.turns[0].content,
+            CanonicalContent::Text("Be exact.".into())
+        );
+        assert!(matches!(first.turns[1].content, CanonicalContent::Parts(_)));
+        assert_ne!(first.digest(), second.digest());
     }
 
     #[test]

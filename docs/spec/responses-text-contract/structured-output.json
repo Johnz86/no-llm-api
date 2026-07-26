@@ -207,11 +207,11 @@
           }
         ],
         "output_text": "{\"status\":\"green\",\"blockers\":0}",
-        "parallel_tool_calls": false,
+        "parallel_tool_calls": true,
         "previous_response_id": null,
         "reasoning": null,
         "status": "completed",
-        "store": false,
+        "store": true,
         "temperature": null,
         "text": {
           "format": {
@@ -301,11 +301,11 @@
       }
     ],
     "output_text": "{\"status\":\"green\",\"blockers\":0}",
-    "parallel_tool_calls": false,
+    "parallel_tool_calls": true,
     "previous_response_id": null,
     "reasoning": null,
     "status": "completed",
-    "store": false,
+    "store": true,
     "temperature": null,
     "text": {
       "format": {
