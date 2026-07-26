@@ -82,7 +82,12 @@ fn the_extract_has_no_dangling_references() {
 
 #[test]
 fn the_extract_is_small_enough_to_review_in_a_diff() {
-    let bytes = std::fs::metadata(EXTRACT).expect(EXTRACT).len();
+    let contents = std::fs::read(EXTRACT).expect(EXTRACT);
+    assert!(
+        !contents.windows(2).any(|pair| pair == b"\r\n"),
+        "{EXTRACT} must stay LF-only so the reviewability guard is platform-independent"
+    );
+    let bytes = contents.len();
     assert!(
         bytes < 512 * 1024,
         "{EXTRACT} is {bytes} bytes; the point of pruning is reviewability"
