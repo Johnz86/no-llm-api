@@ -14,6 +14,8 @@ use crate::sim::scenario::{Fault, FaultKind, Scenario, Timing};
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct Directive {
+    pub case: Option<String>,
+    pub variant: Option<String>,
     pub ttft_ms: Option<u64>,
     pub tokens_per_second: Option<u32>,
     pub jitter_ms: Option<u64>,
@@ -53,6 +55,8 @@ impl Directive {
                 continue;
             };
             match key {
+                "case" => directive.case = non_empty(value),
+                "variant" => directive.variant = non_empty(value),
                 "fault" => directive.absorb_fault_spec(value),
                 "ttft-ms" => directive.ttft_ms = value.trim().parse().ok(),
                 "tps" | "tokens-per-second" => {
@@ -93,6 +97,8 @@ impl Directive {
     /// Later directives win, member by member.
     pub fn merge(self, higher: Directive) -> Directive {
         Directive {
+            case: higher.case.or(self.case),
+            variant: higher.variant.or(self.variant),
             ttft_ms: higher.ttft_ms.or(self.ttft_ms),
             tokens_per_second: higher.tokens_per_second.or(self.tokens_per_second),
             jitter_ms: higher.jitter_ms.or(self.jitter_ms),
@@ -150,6 +156,11 @@ impl Directive {
     }
 }
 
+fn non_empty(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,6 +187,19 @@ mod tests {
     }
 
     #[test]
+    fn semantic_selector_headers_are_parsed() {
+        let directive = Directive::from_headers([
+            ("x-simulate-case", " reasoning-effort/release-decision "),
+            ("x-simulate-variant", "high"),
+        ]);
+        assert_eq!(
+            directive.case.as_deref(),
+            Some("reasoning-effort/release-decision")
+        );
+        assert_eq!(directive.variant.as_deref(), Some("high"));
+    }
+
+    #[test]
     fn unrelated_headers_and_garbage_values_are_ignored() {
         let directive = Directive::from_headers([
             ("authorization", "Bearer x"),
@@ -186,9 +210,22 @@ mod tests {
 
     #[test]
     fn body_directive_overrides_headers() {
-        let header = Directive::from_headers([("x-simulate-tps", "5")]);
-        let body = Directive::from_value(&serde_json::json!({ "tokens_per_second": 9 }));
+        let header = Directive::from_headers([
+            ("x-simulate-case", "basic-text/concise"),
+            ("x-simulate-variant", "default"),
+            ("x-simulate-tps", "5"),
+        ]);
+        let body = Directive::from_value(&serde_json::json!({
+            "case": "reasoning-effort/release-decision",
+            "variant": "high",
+            "tokens_per_second": 9
+        }));
         let merged = header.merge(body);
+        assert_eq!(
+            merged.case.as_deref(),
+            Some("reasoning-effort/release-decision")
+        );
+        assert_eq!(merged.variant.as_deref(), Some("high"));
         assert_eq!(merged.tokens_per_second, Some(9));
     }
 
