@@ -207,11 +207,8 @@ pub fn compile(
         controls,
     };
     let body_json = canonical_json(&serde_json::to_value(&body).expect("plan body serializes"));
-    let digest = digest_fields([
-        PLAN_VERSION,
-        request.canonical_json().as_str(),
-        body_json.as_str(),
-    ]);
+    let semantic_request = request.semantic_json();
+    let digest = digest_fields([PLAN_VERSION, semantic_request.as_str(), body_json.as_str()]);
     let plan_digest = format!("{digest:016x}");
     let explanation = PlanExplanation {
         match_kind,

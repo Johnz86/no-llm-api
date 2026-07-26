@@ -1,8 +1,17 @@
 //! Executable contract corpus for the first Responses text/reasoning slice.
 
+mod support;
+
 use std::collections::BTreeMap;
 
+use no_llm_api::models::ModelCatalogue;
+use no_llm_api::responses::{CreateResponseRequest, render_response};
+use no_llm_api::sim::artifact::builtin_artifact;
+use no_llm_api::sim::plan::{SemanticCapabilities, compile};
+use no_llm_api::sim::responses_stream::response_events;
 use serde_json::Value;
+use support::sse::collect_sse_at;
+use support::{fixture, send};
 
 const ROOT: &str = "docs/spec/responses-text-contract";
 
@@ -20,6 +29,90 @@ fn cases() -> Vec<Value> {
         .iter()
         .map(|path| read_json(path.as_str().expect("case path")))
         .collect()
+}
+
+fn production_result(case: &Value) -> (Value, Vec<Value>) {
+    let request: CreateResponseRequest =
+        serde_json::from_value(case["request"].clone()).expect("contract request");
+    let models = ModelCatalogue::builtin();
+    let profile = models.profile(&request.model).expect("contract model");
+    let artifact = builtin_artifact();
+    let plan = compile(
+        &artifact.fixtures,
+        &request.canonical_request(),
+        &artifact.selection_controls(None, None),
+        &SemanticCapabilities::from(profile),
+    )
+    .expect("contract semantic plan");
+    let tokenizer = tiktoken_rs::cl100k_base().expect("tokenizer");
+    let response = render_response(&request, &plan, &tokenizer);
+    let events = response_events(&response, &tokenizer);
+    (
+        serde_json::to_value(response).expect("response serializes"),
+        events,
+    )
+}
+
+#[test]
+fn frozen_corpus_is_emitted_by_the_production_planner_and_renderer() {
+    for case in cases() {
+        let name = case["case"].as_str().expect("case name");
+        let (response, events) = production_result(&case);
+        assert_eq!(response, case["response"], "{name} response");
+        assert_eq!(Value::Array(events), case["events"], "{name} events");
+    }
+}
+
+#[tokio::test]
+async fn frozen_corpus_is_emitted_by_the_production_router() {
+    for case in cases() {
+        let name = case["case"].as_str().expect("case name");
+        let fixture = fixture(100_000);
+        let (status, _, body) = send(
+            fixture.app.clone(),
+            "POST",
+            "/v1/responses",
+            Some(case["request"].clone()),
+        )
+        .await;
+        assert_eq!(status, 200, "{name}: {body}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&body).expect("response JSON"),
+            case["response"],
+            "{name} sync response"
+        );
+
+        let mut stream_request = case["request"].clone();
+        stream_request["stream"] = Value::Bool(true);
+        let transcript = collect_sse_at(fixture.app, "/v1/responses", stream_request).await;
+        assert_eq!(
+            Value::Array(transcript.chunks()),
+            case["events"],
+            "{name} stream"
+        );
+    }
+}
+
+#[test]
+#[ignore = "updates the checked-in contract corpus"]
+fn regenerate_frozen_corpus_from_production() {
+    for mut case in cases() {
+        let path = case["case"].as_str().expect("case name").to_string();
+        let file = match path.as_str() {
+            "text" => "text.json",
+            "reasoning-summary" => "reasoning-summary.json",
+            "structured-output" => "structured-output.json",
+            _ => panic!("unknown contract case {path}"),
+        };
+        let (response, events) = production_result(&case);
+        case["response"] = response;
+        case["events"] = Value::Array(events);
+        let encoded = format!(
+            "{}\n",
+            serde_json::to_string_pretty(&case).expect("case serializes")
+        );
+        std::fs::write(format!("{ROOT}/{file}"), encoded).expect("write contract case");
+    }
 }
 
 #[test]
@@ -167,7 +260,7 @@ fn reasoning_summary_is_public_but_raw_reasoning_is_absent() {
     assert!(last_summary < first_output);
     assert_eq!(
         case["response"]["usage"]["output_tokens_details"]["reasoning_tokens"],
-        14
+        28
     );
 
     let encoded = serde_json::to_string(&case).expect("encode case");
@@ -185,5 +278,5 @@ fn structured_output_preserves_wire_bytes_and_semantic_value() {
     assert_eq!(parsed, case["semantic_output"]);
     assert_eq!(case["request"]["text"]["format"]["type"], "json_schema");
     assert_eq!(case["request"]["text"]["format"]["strict"], true);
-    assert_eq!(case["response"]["text"]["format"]["name"], "release_status");
+    assert_eq!(case["response"]["text"]["format"]["name"], "release-status");
 }

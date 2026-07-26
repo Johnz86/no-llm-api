@@ -1,60 +1,367 @@
 {
   "case": "text",
+  "events": [
+    {
+      "response": {
+        "id": "resp_2aaebd387ec703fed8658b33",
+        "object": "response",
+        "output": [],
+        "status": "in_progress"
+      },
+      "sequence_number": 0,
+      "type": "response.created"
+    },
+    {
+      "response": {
+        "id": "resp_2aaebd387ec703fed8658b33",
+        "object": "response",
+        "output": [],
+        "status": "in_progress"
+      },
+      "sequence_number": 1,
+      "type": "response.in_progress"
+    },
+    {
+      "item": {
+        "content": [],
+        "id": "msg_2aaebd387ec703fe",
+        "role": "assistant",
+        "status": "in_progress",
+        "type": "message"
+      },
+      "output_index": 0,
+      "sequence_number": 2,
+      "type": "response.output_item.added"
+    },
+    {
+      "content_index": 0,
+      "item_id": "msg_2aaebd387ec703fe",
+      "output_index": 0,
+      "part": {
+        "annotations": [],
+        "logprobs": [],
+        "text": "",
+        "type": "output_text"
+      },
+      "sequence_number": 3,
+      "type": "response.content_part.added"
+    },
+    {
+      "content_index": 0,
+      "delta": "no",
+      "item_id": "msg_2aaebd387ec703fe",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 4,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": "-",
+      "item_id": "msg_2aaebd387ec703fe",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 5,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": "ll",
+      "item_id": "msg_2aaebd387ec703fe",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 6,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": "m",
+      "item_id": "msg_2aaebd387ec703fe",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 7,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": "-api",
+      "item_id": "msg_2aaebd387ec703fe",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 8,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": " repl",
+      "item_id": "msg_2aaebd387ec703fe",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 9,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": "ays",
+      "item_id": "msg_2aaebd387ec703fe",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 10,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": " deterministic",
+      "item_id": "msg_2aaebd387ec703fe",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 11,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": ",",
+      "item_id": "msg_2aaebd387ec703fe",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 12,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": " authored",
+      "item_id": "msg_2aaebd387ec703fe",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 13,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": " model",
+      "item_id": "msg_2aaebd387ec703fe",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 14,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": " outcomes",
+      "item_id": "msg_2aaebd387ec703fe",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 15,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": " for",
+      "item_id": "msg_2aaebd387ec703fe",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 16,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": " client",
+      "item_id": "msg_2aaebd387ec703fe",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 17,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": " development",
+      "item_id": "msg_2aaebd387ec703fe",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 18,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": ".",
+      "item_id": "msg_2aaebd387ec703fe",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 19,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "item_id": "msg_2aaebd387ec703fe",
+      "logprobs": [],
+      "output_index": 0,
+      "sequence_number": 20,
+      "text": "no-llm-api replays deterministic, authored model outcomes for client development.",
+      "type": "response.output_text.done"
+    },
+    {
+      "content_index": 0,
+      "item_id": "msg_2aaebd387ec703fe",
+      "output_index": 0,
+      "part": {
+        "annotations": [],
+        "logprobs": [],
+        "text": "no-llm-api replays deterministic, authored model outcomes for client development.",
+        "type": "output_text"
+      },
+      "sequence_number": 21,
+      "type": "response.content_part.done"
+    },
+    {
+      "item": {
+        "content": [
+          {
+            "annotations": [],
+            "logprobs": [],
+            "text": "no-llm-api replays deterministic, authored model outcomes for client development.",
+            "type": "output_text"
+          }
+        ],
+        "id": "msg_2aaebd387ec703fe",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
+      },
+      "output_index": 0,
+      "sequence_number": 22,
+      "type": "response.output_item.done"
+    },
+    {
+      "response": {
+        "completed_at": 1750547199,
+        "conversation": null,
+        "created_at": 1750547198,
+        "error": null,
+        "id": "resp_2aaebd387ec703fed8658b33",
+        "incomplete_details": null,
+        "instructions": null,
+        "max_output_tokens": null,
+        "metadata": {},
+        "model": "mock-gpt-4o",
+        "object": "response",
+        "output": [
+          {
+            "content": [
+              {
+                "annotations": [],
+                "logprobs": [],
+                "text": "no-llm-api replays deterministic, authored model outcomes for client development.",
+                "type": "output_text"
+              }
+            ],
+            "id": "msg_2aaebd387ec703fe",
+            "role": "assistant",
+            "status": "completed",
+            "type": "message"
+          }
+        ],
+        "output_text": "no-llm-api replays deterministic, authored model outcomes for client development.",
+        "parallel_tool_calls": false,
+        "previous_response_id": null,
+        "reasoning": null,
+        "status": "completed",
+        "store": false,
+        "temperature": null,
+        "text": {
+          "format": {
+            "type": "text"
+          }
+        },
+        "tool_choice": "auto",
+        "tools": [],
+        "top_p": null,
+        "usage": {
+          "input_tokens": 10,
+          "input_tokens_details": {
+            "cache_write_tokens": 0,
+            "cached_tokens": 0
+          },
+          "output_tokens": 16,
+          "output_tokens_details": {
+            "reasoning_tokens": 0
+          },
+          "total_tokens": 26
+        }
+      },
+      "sequence_number": 23,
+      "type": "response.completed"
+    }
+  ],
   "request": {
-    "model": "mock-text",
-    "input": "Say hello.",
+    "input": [
+      {
+        "content": "Answer in one sentence.",
+        "role": "developer",
+        "type": "message"
+      },
+      {
+        "content": "Introduce the simulator.",
+        "role": "user",
+        "type": "message"
+      }
+    ],
+    "model": "mock-gpt-4o",
     "stream": false
   },
   "response": {
-    "id": "resp_text_01",
-    "object": "response",
-    "created_at": 1700000000,
-    "completed_at": 1700000001,
-    "status": "completed",
+    "completed_at": 1750547199,
+    "conversation": null,
+    "created_at": 1750547198,
     "error": null,
+    "id": "resp_2aaebd387ec703fed8658b33",
     "incomplete_details": null,
-    "model": "mock-text",
+    "instructions": null,
+    "max_output_tokens": null,
+    "metadata": {},
+    "model": "mock-gpt-4o",
+    "object": "response",
     "output": [
       {
-        "id": "msg_text_01",
-        "type": "message",
-        "role": "assistant",
-        "status": "completed",
         "content": [
           {
-            "type": "output_text",
-            "text": "Hello from the deterministic simulator.",
             "annotations": [],
-            "logprobs": []
+            "logprobs": [],
+            "text": "no-llm-api replays deterministic, authored model outcomes for client development.",
+            "type": "output_text"
           }
-        ]
+        ],
+        "id": "msg_2aaebd387ec703fe",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
       }
     ],
+    "output_text": "no-llm-api replays deterministic, authored model outcomes for client development.",
     "parallel_tool_calls": false,
     "previous_response_id": null,
     "reasoning": null,
+    "status": "completed",
     "store": false,
-    "text": { "format": { "type": "text" } },
-    "tools": [],
-    "usage": {
-      "input_tokens": 4,
-      "input_tokens_details": { "cached_tokens": 0, "cache_write_tokens": 0 },
-      "output_tokens": 7,
-      "output_tokens_details": { "reasoning_tokens": 0 },
-      "total_tokens": 11
+    "temperature": null,
+    "text": {
+      "format": {
+        "type": "text"
+      }
     },
-    "metadata": {}
-  },
-  "events": [
-    { "type": "response.created", "response": { "id": "resp_text_01", "object": "response", "status": "in_progress", "output": [] }, "sequence_number": 0 },
-    { "type": "response.in_progress", "response": { "id": "resp_text_01", "object": "response", "status": "in_progress", "output": [] }, "sequence_number": 1 },
-    { "type": "response.output_item.added", "output_index": 0, "item": { "id": "msg_text_01", "type": "message", "role": "assistant", "status": "in_progress", "content": [] }, "sequence_number": 2 },
-    { "type": "response.content_part.added", "item_id": "msg_text_01", "output_index": 0, "content_index": 0, "part": { "type": "output_text", "text": "", "annotations": [], "logprobs": [] }, "sequence_number": 3 },
-    { "type": "response.output_text.delta", "item_id": "msg_text_01", "output_index": 0, "content_index": 0, "delta": "Hello from the ", "logprobs": [], "sequence_number": 4 },
-    { "type": "response.output_text.delta", "item_id": "msg_text_01", "output_index": 0, "content_index": 0, "delta": "deterministic simulator.", "logprobs": [], "sequence_number": 5 },
-    { "type": "response.output_text.done", "item_id": "msg_text_01", "output_index": 0, "content_index": 0, "text": "Hello from the deterministic simulator.", "logprobs": [], "sequence_number": 6 },
-    { "type": "response.content_part.done", "item_id": "msg_text_01", "output_index": 0, "content_index": 0, "part": { "type": "output_text", "text": "Hello from the deterministic simulator.", "annotations": [], "logprobs": [] }, "sequence_number": 7 },
-    { "type": "response.output_item.done", "output_index": 0, "item": { "id": "msg_text_01", "type": "message", "role": "assistant", "status": "completed", "content": [{ "type": "output_text", "text": "Hello from the deterministic simulator.", "annotations": [], "logprobs": [] }] }, "sequence_number": 8 },
-    { "type": "response.completed", "response": { "id": "resp_text_01", "object": "response", "created_at": 1700000000, "completed_at": 1700000001, "status": "completed", "error": null, "incomplete_details": null, "model": "mock-text", "output": [{ "id": "msg_text_01", "type": "message", "role": "assistant", "status": "completed", "content": [{ "type": "output_text", "text": "Hello from the deterministic simulator.", "annotations": [], "logprobs": [] }] }], "parallel_tool_calls": false, "previous_response_id": null, "reasoning": null, "store": false, "text": { "format": { "type": "text" } }, "tools": [], "usage": { "input_tokens": 4, "input_tokens_details": { "cached_tokens": 0, "cache_write_tokens": 0 }, "output_tokens": 7, "output_tokens_details": { "reasoning_tokens": 0 }, "total_tokens": 11 }, "metadata": {} }, "sequence_number": 9 }
-  ]
+    "tool_choice": "auto",
+    "tools": [],
+    "top_p": null,
+    "usage": {
+      "input_tokens": 10,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0
+      },
+      "output_tokens": 16,
+      "output_tokens_details": {
+        "reasoning_tokens": 0
+      },
+      "total_tokens": 26
+    }
+  }
 }

@@ -1,71 +1,458 @@
 {
   "case": "reasoning-summary",
+  "events": [
+    {
+      "response": {
+        "id": "resp_c2d85e07a09d2c633365dfe9",
+        "object": "response",
+        "output": [],
+        "status": "in_progress"
+      },
+      "sequence_number": 0,
+      "type": "response.created"
+    },
+    {
+      "response": {
+        "id": "resp_c2d85e07a09d2c633365dfe9",
+        "object": "response",
+        "output": [],
+        "status": "in_progress"
+      },
+      "sequence_number": 1,
+      "type": "response.in_progress"
+    },
+    {
+      "item": {
+        "encrypted_content": null,
+        "id": "rs_c2d85e07a09d2c63",
+        "status": "in_progress",
+        "summary": [],
+        "type": "reasoning"
+      },
+      "output_index": 0,
+      "sequence_number": 2,
+      "type": "response.output_item.added"
+    },
+    {
+      "item_id": "rs_c2d85e07a09d2c63",
+      "output_index": 0,
+      "part": {
+        "text": "",
+        "type": "summary_text"
+      },
+      "sequence_number": 3,
+      "summary_index": 0,
+      "type": "response.reasoning_summary_part.added"
+    },
+    {
+      "delta": "Com",
+      "item_id": "rs_c2d85e07a09d2c63",
+      "output_index": 0,
+      "sequence_number": 4,
+      "summary_index": 0,
+      "type": "response.reasoning_summary_text.delta"
+    },
+    {
+      "delta": "pared",
+      "item_id": "rs_c2d85e07a09d2c63",
+      "output_index": 0,
+      "sequence_number": 5,
+      "summary_index": 0,
+      "type": "response.reasoning_summary_text.delta"
+    },
+    {
+      "delta": " readiness",
+      "item_id": "rs_c2d85e07a09d2c63",
+      "output_index": 0,
+      "sequence_number": 6,
+      "summary_index": 0,
+      "type": "response.reasoning_summary_text.delta"
+    },
+    {
+      "delta": ",",
+      "item_id": "rs_c2d85e07a09d2c63",
+      "output_index": 0,
+      "sequence_number": 7,
+      "summary_index": 0,
+      "type": "response.reasoning_summary_text.delta"
+    },
+    {
+      "delta": " blockers",
+      "item_id": "rs_c2d85e07a09d2c63",
+      "output_index": 0,
+      "sequence_number": 8,
+      "summary_index": 0,
+      "type": "response.reasoning_summary_text.delta"
+    },
+    {
+      "delta": ",",
+      "item_id": "rs_c2d85e07a09d2c63",
+      "output_index": 0,
+      "sequence_number": 9,
+      "summary_index": 0,
+      "type": "response.reasoning_summary_text.delta"
+    },
+    {
+      "delta": " rollback",
+      "item_id": "rs_c2d85e07a09d2c63",
+      "output_index": 0,
+      "sequence_number": 10,
+      "summary_index": 0,
+      "type": "response.reasoning_summary_text.delta"
+    },
+    {
+      "delta": " coverage",
+      "item_id": "rs_c2d85e07a09d2c63",
+      "output_index": 0,
+      "sequence_number": 11,
+      "summary_index": 0,
+      "type": "response.reasoning_summary_text.delta"
+    },
+    {
+      "delta": ",",
+      "item_id": "rs_c2d85e07a09d2c63",
+      "output_index": 0,
+      "sequence_number": 12,
+      "summary_index": 0,
+      "type": "response.reasoning_summary_text.delta"
+    },
+    {
+      "delta": " ownership",
+      "item_id": "rs_c2d85e07a09d2c63",
+      "output_index": 0,
+      "sequence_number": 13,
+      "summary_index": 0,
+      "type": "response.reasoning_summary_text.delta"
+    },
+    {
+      "delta": ",",
+      "item_id": "rs_c2d85e07a09d2c63",
+      "output_index": 0,
+      "sequence_number": 14,
+      "summary_index": 0,
+      "type": "response.reasoning_summary_text.delta"
+    },
+    {
+      "delta": " and",
+      "item_id": "rs_c2d85e07a09d2c63",
+      "output_index": 0,
+      "sequence_number": 15,
+      "summary_index": 0,
+      "type": "response.reasoning_summary_text.delta"
+    },
+    {
+      "delta": " recovery",
+      "item_id": "rs_c2d85e07a09d2c63",
+      "output_index": 0,
+      "sequence_number": 16,
+      "summary_index": 0,
+      "type": "response.reasoning_summary_text.delta"
+    },
+    {
+      "delta": " time",
+      "item_id": "rs_c2d85e07a09d2c63",
+      "output_index": 0,
+      "sequence_number": 17,
+      "summary_index": 0,
+      "type": "response.reasoning_summary_text.delta"
+    },
+    {
+      "delta": ".",
+      "item_id": "rs_c2d85e07a09d2c63",
+      "output_index": 0,
+      "sequence_number": 18,
+      "summary_index": 0,
+      "type": "response.reasoning_summary_text.delta"
+    },
+    {
+      "item_id": "rs_c2d85e07a09d2c63",
+      "output_index": 0,
+      "sequence_number": 19,
+      "summary_index": 0,
+      "text": "Compared readiness, blockers, rollback coverage, ownership, and recovery time.",
+      "type": "response.reasoning_summary_text.done"
+    },
+    {
+      "item_id": "rs_c2d85e07a09d2c63",
+      "output_index": 0,
+      "part": {
+        "text": "Compared readiness, blockers, rollback coverage, ownership, and recovery time.",
+        "type": "summary_text"
+      },
+      "sequence_number": 20,
+      "summary_index": 0,
+      "type": "response.reasoning_summary_part.done"
+    },
+    {
+      "item": {
+        "id": "rs_c2d85e07a09d2c63",
+        "status": "completed",
+        "summary": [
+          {
+            "text": "Compared readiness, blockers, rollback coverage, ownership, and recovery time.",
+            "type": "summary_text"
+          }
+        ],
+        "type": "reasoning"
+      },
+      "output_index": 0,
+      "sequence_number": 21,
+      "type": "response.output_item.done"
+    },
+    {
+      "item": {
+        "content": [],
+        "id": "msg_c2d85e07a09d2c63",
+        "role": "assistant",
+        "status": "in_progress",
+        "type": "message"
+      },
+      "output_index": 1,
+      "sequence_number": 22,
+      "type": "response.output_item.added"
+    },
+    {
+      "content_index": 0,
+      "item_id": "msg_c2d85e07a09d2c63",
+      "output_index": 1,
+      "part": {
+        "annotations": [],
+        "logprobs": [],
+        "text": "",
+        "type": "output_text"
+      },
+      "sequence_number": 23,
+      "type": "response.content_part.added"
+    },
+    {
+      "content_index": 0,
+      "delta": "Ship",
+      "item_id": "msg_c2d85e07a09d2c63",
+      "logprobs": [],
+      "output_index": 1,
+      "sequence_number": 24,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": " release",
+      "item_id": "msg_c2d85e07a09d2c63",
+      "logprobs": [],
+      "output_index": 1,
+      "sequence_number": 25,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": " B",
+      "item_id": "msg_c2d85e07a09d2c63",
+      "logprobs": [],
+      "output_index": 1,
+      "sequence_number": 26,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "delta": ".",
+      "item_id": "msg_c2d85e07a09d2c63",
+      "logprobs": [],
+      "output_index": 1,
+      "sequence_number": 27,
+      "type": "response.output_text.delta"
+    },
+    {
+      "content_index": 0,
+      "item_id": "msg_c2d85e07a09d2c63",
+      "logprobs": [],
+      "output_index": 1,
+      "sequence_number": 28,
+      "text": "Ship release B.",
+      "type": "response.output_text.done"
+    },
+    {
+      "content_index": 0,
+      "item_id": "msg_c2d85e07a09d2c63",
+      "output_index": 1,
+      "part": {
+        "annotations": [],
+        "logprobs": [],
+        "text": "Ship release B.",
+        "type": "output_text"
+      },
+      "sequence_number": 29,
+      "type": "response.content_part.done"
+    },
+    {
+      "item": {
+        "content": [
+          {
+            "annotations": [],
+            "logprobs": [],
+            "text": "Ship release B.",
+            "type": "output_text"
+          }
+        ],
+        "id": "msg_c2d85e07a09d2c63",
+        "role": "assistant",
+        "status": "completed",
+        "type": "message"
+      },
+      "output_index": 1,
+      "sequence_number": 30,
+      "type": "response.output_item.done"
+    },
+    {
+      "response": {
+        "completed_at": 1762911972,
+        "conversation": null,
+        "created_at": 1762911971,
+        "error": null,
+        "id": "resp_c2d85e07a09d2c633365dfe9",
+        "incomplete_details": null,
+        "instructions": null,
+        "max_output_tokens": null,
+        "metadata": {},
+        "model": "mock-reasoner",
+        "object": "response",
+        "output": [
+          {
+            "id": "rs_c2d85e07a09d2c63",
+            "status": "completed",
+            "summary": [
+              {
+                "text": "Compared readiness, blockers, rollback coverage, ownership, and recovery time.",
+                "type": "summary_text"
+              }
+            ],
+            "type": "reasoning"
+          },
+          {
+            "content": [
+              {
+                "annotations": [],
+                "logprobs": [],
+                "text": "Ship release B.",
+                "type": "output_text"
+              }
+            ],
+            "id": "msg_c2d85e07a09d2c63",
+            "role": "assistant",
+            "status": "completed",
+            "type": "message"
+          }
+        ],
+        "output_text": "Ship release B.",
+        "parallel_tool_calls": false,
+        "previous_response_id": null,
+        "reasoning": {
+          "effort": "high",
+          "summary": "auto"
+        },
+        "status": "completed",
+        "store": false,
+        "temperature": null,
+        "text": {
+          "format": {
+            "type": "text"
+          }
+        },
+        "tool_choice": "auto",
+        "tools": [],
+        "top_p": null,
+        "usage": {
+          "input_tokens": 5,
+          "input_tokens_details": {
+            "cache_write_tokens": 0,
+            "cached_tokens": 0
+          },
+          "output_tokens": 32,
+          "output_tokens_details": {
+            "reasoning_tokens": 28
+          },
+          "total_tokens": 37
+        }
+      },
+      "sequence_number": 31,
+      "type": "response.completed"
+    }
+  ],
   "request": {
-    "model": "mock-reasoner",
     "input": "Which release should ship?",
-    "reasoning": { "effort": "high", "summary": "auto" },
+    "model": "mock-reasoner",
+    "reasoning": {
+      "effort": "high",
+      "summary": "auto"
+    },
     "stream": false
   },
   "response": {
-    "id": "resp_reasoning_01",
-    "object": "response",
-    "created_at": 1700000010,
-    "completed_at": 1700000011,
-    "status": "completed",
+    "completed_at": 1762911972,
+    "conversation": null,
+    "created_at": 1762911971,
     "error": null,
+    "id": "resp_c2d85e07a09d2c633365dfe9",
     "incomplete_details": null,
+    "instructions": null,
+    "max_output_tokens": null,
+    "metadata": {},
     "model": "mock-reasoner",
+    "object": "response",
     "output": [
       {
-        "id": "rs_reasoning_01",
-        "type": "reasoning",
+        "id": "rs_c2d85e07a09d2c63",
         "status": "completed",
         "summary": [
-          { "type": "summary_text", "text": "Compared readiness, rollback coverage, and ownership." }
-        ]
+          {
+            "text": "Compared readiness, blockers, rollback coverage, ownership, and recovery time.",
+            "type": "summary_text"
+          }
+        ],
+        "type": "reasoning"
       },
       {
-        "id": "msg_reasoning_01",
-        "type": "message",
+        "content": [
+          {
+            "annotations": [],
+            "logprobs": [],
+            "text": "Ship release B.",
+            "type": "output_text"
+          }
+        ],
+        "id": "msg_c2d85e07a09d2c63",
         "role": "assistant",
         "status": "completed",
-        "content": [
-          { "type": "output_text", "text": "Ship release B.", "annotations": [], "logprobs": [] }
-        ]
+        "type": "message"
       }
     ],
+    "output_text": "Ship release B.",
     "parallel_tool_calls": false,
     "previous_response_id": null,
-    "reasoning": { "effort": "high", "summary": "auto" },
-    "store": false,
-    "text": { "format": { "type": "text" } },
-    "tools": [],
-    "usage": {
-      "input_tokens": 6,
-      "input_tokens_details": { "cached_tokens": 0, "cache_write_tokens": 0 },
-      "output_tokens": 18,
-      "output_tokens_details": { "reasoning_tokens": 14 },
-      "total_tokens": 24
+    "reasoning": {
+      "effort": "high",
+      "summary": "auto"
     },
-    "metadata": {}
-  },
-  "events": [
-    { "type": "response.created", "response": { "id": "resp_reasoning_01", "object": "response", "status": "in_progress", "output": [] }, "sequence_number": 0 },
-    { "type": "response.in_progress", "response": { "id": "resp_reasoning_01", "object": "response", "status": "in_progress", "output": [] }, "sequence_number": 1 },
-    { "type": "response.output_item.added", "output_index": 0, "item": { "id": "rs_reasoning_01", "type": "reasoning", "status": "in_progress", "summary": [] }, "sequence_number": 2 },
-    { "type": "response.reasoning_summary_part.added", "item_id": "rs_reasoning_01", "output_index": 0, "summary_index": 0, "part": { "type": "summary_text", "text": "" }, "sequence_number": 3 },
-    { "type": "response.reasoning_summary_text.delta", "item_id": "rs_reasoning_01", "output_index": 0, "summary_index": 0, "delta": "Compared readiness, ", "sequence_number": 4 },
-    { "type": "response.reasoning_summary_text.delta", "item_id": "rs_reasoning_01", "output_index": 0, "summary_index": 0, "delta": "rollback coverage, and ownership.", "sequence_number": 5 },
-    { "type": "response.reasoning_summary_text.done", "item_id": "rs_reasoning_01", "output_index": 0, "summary_index": 0, "text": "Compared readiness, rollback coverage, and ownership.", "sequence_number": 6 },
-    { "type": "response.reasoning_summary_part.done", "item_id": "rs_reasoning_01", "output_index": 0, "summary_index": 0, "part": { "type": "summary_text", "text": "Compared readiness, rollback coverage, and ownership." }, "sequence_number": 7 },
-    { "type": "response.output_item.done", "output_index": 0, "item": { "id": "rs_reasoning_01", "type": "reasoning", "status": "completed", "summary": [{ "type": "summary_text", "text": "Compared readiness, rollback coverage, and ownership." }] }, "sequence_number": 8 },
-    { "type": "response.output_item.added", "output_index": 1, "item": { "id": "msg_reasoning_01", "type": "message", "role": "assistant", "status": "in_progress", "content": [] }, "sequence_number": 9 },
-    { "type": "response.content_part.added", "item_id": "msg_reasoning_01", "output_index": 1, "content_index": 0, "part": { "type": "output_text", "text": "", "annotations": [], "logprobs": [] }, "sequence_number": 10 },
-    { "type": "response.output_text.delta", "item_id": "msg_reasoning_01", "output_index": 1, "content_index": 0, "delta": "Ship ", "logprobs": [], "sequence_number": 11 },
-    { "type": "response.output_text.delta", "item_id": "msg_reasoning_01", "output_index": 1, "content_index": 0, "delta": "release B.", "logprobs": [], "sequence_number": 12 },
-    { "type": "response.output_text.done", "item_id": "msg_reasoning_01", "output_index": 1, "content_index": 0, "text": "Ship release B.", "logprobs": [], "sequence_number": 13 },
-    { "type": "response.content_part.done", "item_id": "msg_reasoning_01", "output_index": 1, "content_index": 0, "part": { "type": "output_text", "text": "Ship release B.", "annotations": [], "logprobs": [] }, "sequence_number": 14 },
-    { "type": "response.output_item.done", "output_index": 1, "item": { "id": "msg_reasoning_01", "type": "message", "role": "assistant", "status": "completed", "content": [{ "type": "output_text", "text": "Ship release B.", "annotations": [], "logprobs": [] }] }, "sequence_number": 15 },
-    { "type": "response.completed", "response": { "id": "resp_reasoning_01", "object": "response", "created_at": 1700000010, "completed_at": 1700000011, "status": "completed", "error": null, "incomplete_details": null, "model": "mock-reasoner", "output": [{ "id": "rs_reasoning_01", "type": "reasoning", "status": "completed", "summary": [{ "type": "summary_text", "text": "Compared readiness, rollback coverage, and ownership." }] }, { "id": "msg_reasoning_01", "type": "message", "role": "assistant", "status": "completed", "content": [{ "type": "output_text", "text": "Ship release B.", "annotations": [], "logprobs": [] }] }], "parallel_tool_calls": false, "previous_response_id": null, "reasoning": { "effort": "high", "summary": "auto" }, "store": false, "text": { "format": { "type": "text" } }, "tools": [], "usage": { "input_tokens": 6, "input_tokens_details": { "cached_tokens": 0, "cache_write_tokens": 0 }, "output_tokens": 18, "output_tokens_details": { "reasoning_tokens": 14 }, "total_tokens": 24 }, "metadata": {} }, "sequence_number": 16 }
-  ]
+    "status": "completed",
+    "store": false,
+    "temperature": null,
+    "text": {
+      "format": {
+        "type": "text"
+      }
+    },
+    "tool_choice": "auto",
+    "tools": [],
+    "top_p": null,
+    "usage": {
+      "input_tokens": 5,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0
+      },
+      "output_tokens": 32,
+      "output_tokens_details": {
+        "reasoning_tokens": 28
+      },
+      "total_tokens": 37
+    }
+  }
 }

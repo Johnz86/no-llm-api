@@ -101,8 +101,18 @@ impl CanonicalRequest {
         canonical_json(&serde_json::to_value(self).expect("canonical request is serializable"))
     }
 
+    pub fn semantic_json(&self) -> String {
+        let mut value = serde_json::to_value(self).expect("canonical request is serializable");
+        let object = value
+            .as_object_mut()
+            .expect("canonical requests serialize as objects");
+        object.remove("stream");
+        object.remove("store");
+        canonical_json(&value)
+    }
+
     pub fn digest(&self) -> u64 {
-        let json = self.canonical_json();
+        let json = self.semantic_json();
         digest_fields(["semantic-request-v1", json.as_str()])
     }
 
@@ -260,5 +270,25 @@ mod tests {
             refusal: None,
         });
         assert_ne!(first.digest(), second.digest());
+    }
+
+    #[test]
+    fn transport_and_persistence_do_not_change_semantic_identity() {
+        let first = CanonicalRequest::from_chat(&ChatCompletionRequest {
+            model: "m".to_string(),
+            stream: false,
+            store: Some(false),
+            ..Default::default()
+        });
+        let second = CanonicalRequest::from_chat(&ChatCompletionRequest {
+            model: "m".to_string(),
+            stream: true,
+            store: Some(true),
+            ..Default::default()
+        });
+
+        assert_ne!(first.canonical_json(), second.canonical_json());
+        assert_eq!(first.semantic_json(), second.semantic_json());
+        assert_eq!(first.digest(), second.digest());
     }
 }

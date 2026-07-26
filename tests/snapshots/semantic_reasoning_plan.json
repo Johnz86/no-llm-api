@@ -21,14 +21,14 @@
   "usage": {
     "reasoning_tokens": 28
   },
-  "plan_digest": "222b6c62d64b4ee2",
+  "plan_digest": "c933f6a38341940c",
   "explanation": {
     "match_kind": "exact",
     "fixture_id": "reasoning-effort",
     "case_id": "release-decision",
     "variant_id": "high",
     "variant_reason": "exact_effort",
-    "canonical_request_digest": "bab70133d4317c77",
+    "canonical_request_digest": "35fdbd5b1873c397",
     "turn_shapes": [
       {
         "role": "user",
