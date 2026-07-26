@@ -1,8 +1,9 @@
 # Semantic fixtures
 
 Schema-v2 semantic fixtures author text, reasoning, and structured outcomes independently from the
-legacy Chat parquet dataset. They are an implementation input for the future semantic compiler and
-do not affect runtime selection yet.
+legacy Chat parquet dataset. Explicit per-request selectors render these plans through the existing
+Chat completion and SSE transports. Requests without a selector continue to use the legacy parquet
+matching ladder.
 
 Validate the built-in documents with:
 
@@ -78,7 +79,8 @@ Dataset, scenario, model-profile, and simulation-seed revisions participate in p
 
 The plan explanation exposes fixture/case/variant selection, effective revision controls, request
 digest, and redacted turn shapes. It reports content kinds and byte lengths but never prompt or
-reasoning text. Planning is available through the fixture CLI but is not connected to HTTP routes.
+reasoning text. The fixture CLI exposes planning directly; the HTTP surface invokes the same planner
+when `X-Simulate-Case` or `x_simulate.case` is present.
 
 `sim::artifact` sorts every unordered input, rejects overlapping equal-priority cases and unknown
 or incapable models, tokenizes reasoning and visible output independently, and emits compiler,

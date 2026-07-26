@@ -8,7 +8,7 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::sim::scenario::{Fault, FaultKind, Scenario, Timing};
+use crate::sim::scenario::{Fault, FaultKind, FaultStage, Scenario, Timing};
 
 /// Overrides parsed from one request.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -22,6 +22,7 @@ pub struct Directive {
     pub chunk_tokens: Option<u32>,
     pub burst_frames: Option<u32>,
     pub fault: Option<String>,
+    pub stage: Option<String>,
     pub status: Option<u16>,
     pub retry_after: Option<u64>,
     pub after_ms: Option<u64>,
@@ -58,6 +59,7 @@ impl Directive {
                 "case" => directive.case = non_empty(value),
                 "variant" => directive.variant = non_empty(value),
                 "fault" => directive.absorb_fault_spec(value),
+                "stage" => directive.stage = non_empty(value),
                 "ttft-ms" => directive.ttft_ms = value.trim().parse().ok(),
                 "tps" | "tokens-per-second" => {
                     directive.tokens_per_second = value.trim().parse().ok();
@@ -89,6 +91,7 @@ impl Directive {
                 "after_ms" | "after-ms" => self.after_ms = value.trim().parse().ok(),
                 "after_frames" | "after-frames" => self.after_frames = value.trim().parse().ok(),
                 "rate" => self.rate = value.trim().parse().ok(),
+                "stage" => self.stage = non_empty(value),
                 _ => {}
             }
         }
@@ -105,6 +108,7 @@ impl Directive {
             chunk_tokens: higher.chunk_tokens.or(self.chunk_tokens),
             burst_frames: higher.burst_frames.or(self.burst_frames),
             fault: higher.fault.or(self.fault),
+            stage: higher.stage.or(self.stage),
             status: higher.status.or(self.status),
             retry_after: higher.retry_after.or(self.retry_after),
             after_ms: higher.after_ms.or(self.after_ms),
@@ -133,6 +137,9 @@ impl Directive {
         }
 
         let mut fault = scenario.fault.clone();
+        if let Some(stage) = self.stage.as_deref().and_then(FaultStage::parse) {
+            fault.stage = Some(stage);
+        }
         if let Some(kind) = self.fault.as_deref().and_then(FaultKind::parse) {
             fault.kind = kind;
             // An explicit per-request fault is meant to fire.
@@ -167,11 +174,14 @@ mod tests {
 
     #[test]
     fn header_fault_spec_carries_its_parameters() {
-        let directive =
-            Directive::from_headers([("X-Simulate-Fault", "http_error;status=429;retry_after=3")]);
+        let directive = Directive::from_headers([(
+            "X-Simulate-Fault",
+            "http_error;status=429;retry_after=3;stage=output",
+        )]);
         assert_eq!(directive.fault.as_deref(), Some("http_error"));
         assert_eq!(directive.status, Some(429));
         assert_eq!(directive.retry_after, Some(3));
+        assert_eq!(directive.stage.as_deref(), Some("output"));
     }
 
     #[test]
@@ -191,12 +201,14 @@ mod tests {
         let directive = Directive::from_headers([
             ("x-simulate-case", " reasoning-effort/release-decision "),
             ("x-simulate-variant", "high"),
+            ("x-simulate-stage", "reasoning"),
         ]);
         assert_eq!(
             directive.case.as_deref(),
             Some("reasoning-effort/release-decision")
         );
         assert_eq!(directive.variant.as_deref(), Some("high"));
+        assert_eq!(directive.stage.as_deref(), Some("reasoning"));
     }
 
     #[test]

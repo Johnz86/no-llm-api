@@ -223,9 +223,84 @@ async fn semantic_completion_uses_existing_storage_routes() {
     .await;
     assert_eq!(status, 200);
     let stored: Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(stored["choices"][0]["message"]["content"], "Ship release B.");
+    assert_eq!(
+        stored["choices"][0]["message"]["content"],
+        "Ship release B."
+    );
     assert_eq!(
         stored["choices"][0]["message"]["reasoning_content"],
         "Compared readiness, blockers, and rollback coverage."
     );
+}
+
+fn reasoning_stream_with_fault(stage: &str) -> Value {
+    json!({
+        "model": "mock-reasoner",
+        "messages": [{"role": "user", "content": "Which release should ship?"}],
+        "stream": true,
+        "reasoning_effort": "low",
+        "x_simulate": {
+            "case": "reasoning-effort/release-decision",
+            "fault": "sse_error",
+            "stage": stage
+        }
+    })
+}
+
+fn streamed_reasoning(transcript: &support::sse::Transcript) -> String {
+    transcript
+        .chunks()
+        .iter()
+        .filter_map(|chunk| chunk["choices"][0]["delta"]["reasoning_content"].as_str())
+        .collect()
+}
+
+#[tokio::test]
+async fn stage_fault_can_fire_before_reasoning() {
+    let fixture = fixture(1_000);
+    let transcript = collect_sse(fixture.app, reasoning_stream_with_fault("reasoning")).await;
+
+    assert!(streamed_reasoning(&transcript).is_empty());
+    assert!(transcript.content().is_empty());
+    assert!(
+        transcript
+            .frames
+            .iter()
+            .any(|frame| frame.data.contains("server_error"))
+    );
+    assert_eq!(transcript.frames.last().unwrap().data, "[DONE]");
+}
+
+#[tokio::test]
+async fn stage_fault_can_fire_between_reasoning_and_output() {
+    let fixture = fixture(1_000);
+    let transcript = collect_sse(fixture.app, reasoning_stream_with_fault("output")).await;
+
+    assert_eq!(
+        streamed_reasoning(&transcript),
+        "Checked readiness and blockers."
+    );
+    assert!(transcript.content().is_empty());
+    assert!(
+        transcript
+            .frames
+            .iter()
+            .any(|frame| frame.data.contains("server_error"))
+    );
+}
+
+#[tokio::test]
+async fn stage_fault_can_fire_before_the_terminal_chunk() {
+    let fixture = fixture(1_000);
+    let transcript = collect_sse(fixture.app, reasoning_stream_with_fault("terminal")).await;
+
+    assert_eq!(transcript.content(), "Ship release B.");
+    assert!(transcript.finish_reasons().is_empty());
+    assert!(
+        transcript
+            .frames
+            .iter()
+            .any(|frame| frame.data.contains("server_error"))
+    );
+    assert_eq!(transcript.frames.last().unwrap().data, "[DONE]");
 }

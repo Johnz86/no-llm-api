@@ -67,6 +67,8 @@ pub struct Timing {
 #[serde(deny_unknown_fields, default)]
 pub struct Fault {
     pub kind: FaultKind,
+    /// Optional semantic boundary; absent preserves global frame indexing.
+    pub stage: Option<FaultStage>,
     /// Probability in `0.0..=1.0`, evaluated against the seeded generator.
     pub rate: f64,
     /// Status for `http_error`.
@@ -77,6 +79,25 @@ pub struct Fault {
     pub after_ms: Option<u64>,
     /// Frames to emit before `drop`, `sse_error` or `slow_then_recover` acts.
     pub after_frames: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FaultStage {
+    Reasoning,
+    Output,
+    Terminal,
+}
+
+impl FaultStage {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "reasoning" => Some(Self::Reasoning),
+            "output" => Some(Self::Output),
+            "terminal" => Some(Self::Terminal),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
