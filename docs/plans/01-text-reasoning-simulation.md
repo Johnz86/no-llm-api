@@ -594,7 +594,8 @@ Exit: all continuation forms, branches, retries, and failures are reproducible u
 Status: in progress. Output items now expose shared typed identity/kind/content accessors, and the
 stream scheduler carries typed reasoning/output/tool/terminal stage metadata independently from
 wire event names. Text/reasoning identities and event ordering remain covered by contract tests.
-Fixture authoring/migration guidance and final packaging/version review remain pending.
+Fixture authoring examples, migration safeguards, and the experimental `1.0.0` compatibility
+boundary are documented. Final browser and packaging verification remains pending.
 
 - extract output-item and stage abstractions needed by future tool/MCP/skill and media plans;
 - publish fixture authoring examples, compatibility guarantees, and migration notes;

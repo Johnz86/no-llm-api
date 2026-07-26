@@ -72,6 +72,69 @@ The legacy files directly under `fixtures/` remain the source for the shipped Ch
 `fixtures lint` and `fixtures build` for them; never send schema-v2 files through the legacy parquet
 builder.
 
+## Minimal Responses fixture
+
+Start a Responses-only case with an exact authored outcome:
+
+```yaml
+schema_version: 2
+id: release-note
+description: One stable Responses answer used by a client test.
+tags: [text]
+interfaces: [responses]
+match:
+  models: [mock-gpt-4o]
+  turns:
+    - role: user
+      text: Write the release note.
+cases:
+  - id: concise
+    constraints:
+      interfaces: [responses]
+    default_variant: default
+    variants:
+      default:
+        answer: The release is ready.
+    terminal: completed
+```
+
+Place it under `fixtures/v2/`, lint it, and send the exact matching request. The selector is useful
+while developing a case and remains a stable test control when several cases share similar turns:
+
+```bash
+cargo run --locked --bin fixtures -- lint-semantic
+
+curl http://127.0.0.1:8080/v1/responses \
+  -H 'Content-Type: application/json' \
+  -H 'X-Simulate-Case: release-note/concise' \
+  -d '{"model":"mock-gpt-4o","input":"Write the release note."}'
+```
+
+Add `reasoning_summary`, `reasoning_tokens`, and the fixture-level `requirements.reasoning: true`
+for public reasoning. Use `structured_output.json` plus
+`requirements.structured_output: true` for byte-exact JSON. Do not put private chain-of-thought in
+`reasoning_summary`; `reasoning_trace` exists only for the legacy Chat compatibility path and is
+never exposed by Responses.
+
+## Migration and compatibility checklist
+
+1. Leave legacy YAML/parquet fixtures unchanged unless the Chat wire contract intentionally changes.
+2. Use `interfaces: [responses]` for a new Responses-only case; declare both interfaces only when
+   the same authored outcome is intentionally shared.
+3. Keep fixture, case, and variant ids stable after consumers snapshot them. Add a variant instead
+   of renaming one, and keep `default_variant` explicit.
+4. Preserve authored structured JSON bytes. Changing whitespace or key order changes streamed and
+   non-streamed snapshots even when the parsed value is equal.
+5. Run the semantic linter, artifact reproducibility tests, Responses contract/API tests, and the
+   official-client suite before accepting a fixture migration.
+6. Review response ids, output indexes, SSE ordering, usage, and terminal state together. A fixture
+   change is not text-only when any of those observable values move.
+
+Schema-v2 corpus growth cannot alter exact case/variant selection. Digest fallback is revisioned and
+may change only with an explicit dataset revision and reviewed compatibility report. New output-item
+types append through the typed item/stage boundary; they must not renumber existing message or
+reasoning items in an established case.
+
 ## Semantic compiler kernel
 
 `sim::canonical` converts a typed Chat request into a stable protocol-neutral representation. It

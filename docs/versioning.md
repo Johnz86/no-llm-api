@@ -18,6 +18,13 @@ Version `1.0.0` establishes the current Chat Completions wire contract, determin
 selection, configuration surface, and scenario behavior as the stable compatibility baseline.
 Semantic Versioning applies to every release after that baseline.
 
+The Responses and Conversations surface is additive and explicitly experimental in `1.x`. Its
+pinned text/reasoning corpus, item identities, and event ordering are still reviewed as wire
+behavior, but extending that experimental surface does not by itself require `2.0.0`. Declaring the
+surface stable, or incompatibly changing the stable Chat/configuration contract, is the major-version
+boundary. The text/reasoning implementation therefore remains version `1.0.0` for the first
+repository release.
+
 ## How a consumer pins behaviour
 
 1. Pin the image tag or the crate version.
