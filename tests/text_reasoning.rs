@@ -3,6 +3,7 @@
 mod support;
 
 use serde_json::{Value, json};
+use std::collections::HashSet;
 use support::sse::collect_sse;
 use support::{assert_error_envelope, fixture, send, send_with_headers};
 
@@ -41,10 +42,7 @@ async fn explicit_text_case_renders_with_plan_diagnostics() {
     assert_eq!(headers["x-simulate-match"], "explicit");
     assert_eq!(headers["x-simulate-case"], "concise");
     assert_eq!(headers["x-simulate-variant"], "default");
-    assert_eq!(
-        headers["x-simulate-dataset-revision"],
-        "semantic-builtins-v1"
-    );
+    assert_eq!(headers["x-simulate-dataset-revision"].as_bytes().len(), 16);
     assert_eq!(headers["x-simulate-plan-digest"].as_bytes().len(), 16);
 }
 
@@ -159,6 +157,7 @@ async fn structured_output_must_satisfy_the_requested_schema() {
 async fn invalid_requested_schema_fails_before_rendering() {
     let fixture = fixture(1_000);
     let mut body = message("mock-gpt-4o", "Report release status.");
+    body["store"] = json!(true);
     body["response_format"] = json!({
         "type": "json_schema",
         "json_schema": {
@@ -168,7 +167,7 @@ async fn invalid_requested_schema_fails_before_rendering() {
         }
     });
     let (status, _, text) = send_with_headers(
-        fixture.app,
+        fixture.app.clone(),
         "POST",
         "/v1/chat/completions",
         Some(body),
@@ -180,6 +179,11 @@ async fn invalid_requested_schema_fails_before_rendering() {
     let response = assert_error_envelope(&text);
     assert_eq!(response["error"]["param"], "response_format");
     assert_eq!(response["error"]["code"], "semantic_schema_error");
+
+    let (status, _, text) = send(fixture.app, "GET", "/v1/chat/completions", None).await;
+    assert_eq!(status, 200);
+    let stored: Value = serde_json::from_str(&text).unwrap();
+    assert!(stored["data"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -493,4 +497,61 @@ async fn capped_stream_reconstructs_the_capped_completion_and_usage() {
         .find(|chunk| chunk.get("usage").is_some_and(|usage| !usage.is_null()))
         .unwrap()["usage"];
     assert_eq!(streamed_usage, &completion["usage"]);
+}
+
+#[tokio::test]
+async fn concurrent_semantic_requests_produce_one_body_and_plan_digest() {
+    let fixture = fixture(1_000);
+    let body = json!({
+        "model": "mock-reasoner",
+        "messages": [{"role": "user", "content": "Which release should ship?"}],
+        "reasoning_effort": "high"
+    });
+    let calls = (0..64).map(|_| {
+        send_with_headers(
+            fixture.app.clone(),
+            "POST",
+            "/v1/chat/completions",
+            Some(body.clone()),
+            &[("x-simulate-case", "reasoning-effort/release-decision")],
+        )
+    });
+    let results = futures::future::join_all(calls).await;
+    let bodies: HashSet<_> = results.iter().map(|(_, _, body)| body).collect();
+    let digests: HashSet<_> = results
+        .iter()
+        .map(|(status, headers, _)| {
+            assert_eq!(*status, 200);
+            headers["x-simulate-plan-digest"].to_str().unwrap()
+        })
+        .collect();
+
+    assert_eq!(bodies.len(), 1);
+    assert_eq!(digests.len(), 1);
+}
+
+#[tokio::test]
+async fn concurrent_semantic_streams_produce_one_transcript() {
+    let fixture = fixture(1_000);
+    let body = json!({
+        "model": "mock-reasoner",
+        "messages": [{"role": "user", "content": "Which release should ship?"}],
+        "reasoning_effort": "high",
+        "stream": true,
+        "x_simulate": {"case": "reasoning-effort/release-decision"}
+    });
+    let calls = (0..64).map(|_| collect_sse(fixture.app.clone(), body.clone()));
+    let transcripts: HashSet<_> = futures::future::join_all(calls)
+        .await
+        .into_iter()
+        .map(|transcript| {
+            transcript
+                .frames
+                .into_iter()
+                .map(|frame| frame.data)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    assert_eq!(transcripts.len(), 1);
 }

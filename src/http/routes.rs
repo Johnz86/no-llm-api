@@ -25,11 +25,10 @@ use crate::models::ModelCatalogue;
 use crate::request_types::ResponseFormat;
 use crate::service::ChatService;
 use crate::service::SemanticDiagnostics;
+use crate::sim::artifact::{SemanticArtifact, builtin_artifact};
 use crate::sim::canonical::CanonicalRequest;
 use crate::sim::directive::Directive;
-use crate::sim::plan::{
-    PlanError, SelectionControls, SemanticCapabilities, SemanticOutput, SemanticResponsePlan,
-};
+use crate::sim::plan::{PlanError, SemanticCapabilities, SemanticOutput, SemanticResponsePlan};
 use crate::sim::scenario::{FaultKind, Scenario, Timing};
 use crate::sim::stream::{CancelCounter, StreamPlan, sse_stream};
 use crate::store::{ListFilters, SortOrder};
@@ -53,6 +52,7 @@ pub struct AppState {
     pub service: Arc<ChatService>,
     pub cancels: Arc<CancelCounter>,
     pub models: ModelCatalogue,
+    pub semantic: Arc<SemanticArtifact>,
     /// The live behaviour profile, swappable through the control plane.
     pub scenario: Arc<ArcSwap<Scenario>>,
     /// The profile the process started with, restored by `POST /_mock/reset`.
@@ -111,6 +111,7 @@ pub fn build_router_with_options(
         service,
         cancels: Arc::new(CancelCounter::default()),
         models: options.models,
+        semantic: builtin_artifact(),
         scenario: Arc::new(ArcSwap::new(boot_scenario.clone())),
         boot_scenario,
         seed: options.seed,
@@ -413,13 +414,11 @@ async fn create_chat_completion(
             .models
             .profile(&request.model)
             .ok_or_else(|| ApiError::model_not_found(&request.model))?;
-        let controls = SelectionControls {
-            case: directive.case.clone(),
-            variant: directive.variant.clone(),
-            ..Default::default()
-        };
+        let controls = state
+            .semantic
+            .selection_controls(directive.case.clone(), directive.variant.clone());
         let plan = crate::sim::plan::compile(
-            &crate::sim::script::builtin_fixtures(),
+            &state.semantic.fixtures,
             &CanonicalRequest::from_chat(&request),
             &controls,
             &SemanticCapabilities::from(profile),

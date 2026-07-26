@@ -2,16 +2,19 @@
 
 ## Status and intent
 
-This is a future implementation plan. It does not describe the complete behavior of version 1.0.0.
-The shipped server remains a deterministic, offline Chat Completions test double; the proposed work
-extends that foundation to deeper text, reasoning, structured-output, and Responses-style workflows.
+This document tracks the staged text and reasoning implementation beyond version 1.0.0. The server
+remains a deterministic, offline Chat Completions test double while the remaining work extends that
+foundation to Responses-style workflows.
 
-Milestones T0 and T1 are complete. The pinned scope, decisions, event/state table, and executable
+Milestones T0 through T2 are complete. The pinned scope, decisions, event/state table, and executable
 wire corpus live in `docs/spec/responses-text-scope.md` and `docs/spec/responses-text-contract/`.
 Schema-v2 fixtures, deterministic compilation, canonical requests, semantic plans, redacted explain
 output, golden plan snapshots, and reproducible artifacts live under `fixtures/v2`, `sim`, and the
-fixture CLI. Milestones T2 through T6 remain future work; in particular, the shipped Chat renderer
-does not consume semantic plans yet and the server does not expose a Responses route.
+fixture CLI. Explicit per-request selectors render those plans through the existing Chat response,
+SSE, and storage paths with effort variants, schema validation, reasoning-first token budgets,
+diagnostic headers, and stage-aware faults. The legacy matching ladder remains isolated and
+byte-stable. Milestones T3 through T6 remain future work; the server does not expose a Responses
+route yet.
 
 The first future delivery stays text-first. It establishes the shared item model, deterministic
 reasoning policy, state transitions, scenario vocabulary, and validation rules that later tool,

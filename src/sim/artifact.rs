@@ -1,6 +1,7 @@
 //! Deterministic compilation of schema-v2 fixtures into a portable JSON artifact.
 
 use std::collections::BTreeSet;
+use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use tiktoken_rs::CoreBPE;
@@ -117,6 +118,22 @@ impl SemanticArtifact {
             ..Default::default()
         }
     }
+}
+
+pub fn builtin_artifact() -> Arc<SemanticArtifact> {
+    static ARTIFACT: OnceLock<Arc<SemanticArtifact>> = OnceLock::new();
+    ARTIFACT
+        .get_or_init(|| {
+            Arc::new(
+                SemanticArtifact::compile(
+                    &crate::sim::script::builtin_fixtures(),
+                    &ModelCatalogue::builtin(),
+                    &tiktoken_rs::cl100k_base().expect("built-in tokenizer is valid"),
+                )
+                .expect("embedded semantic fixtures compile"),
+            )
+        })
+        .clone()
 }
 
 fn normalized_fixtures(
