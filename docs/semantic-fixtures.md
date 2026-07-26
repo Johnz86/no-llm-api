@@ -46,6 +46,13 @@ answer text, refusal text, or exact JSON bytes under `structured_output.json`. T
 those authored bytes alongside their parsed semantic value. Reasoning and structured output must be
 declared in the fixture's requirements. Structured cases also name their response format.
 
+For an explicitly selected Chat structured-output case, the authored semantic value is validated
+against `response_format.json_schema.schema` before response headers or storage. Invalid schemas and
+non-matching values use the common error envelope with `param: "response_format"`. Validation uses
+the locked `jsonschema` crate without its network features, so schemas must be self-contained; local
+definitions and references work, while remote reference retrieval is intentionally unavailable in
+the offline build. Authored JSON bytes remain unchanged after validation.
+
 The linter rejects unknown fields, duplicate keys and values, non-canonical or duplicate ids,
 unsupported schema versions, missing user turns, empty outcomes, invalid default/fallback
 references, undeclared interfaces or capabilities, ambiguous effort coverage, conflicting visible

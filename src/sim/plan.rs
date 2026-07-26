@@ -364,7 +364,7 @@ fn case_matches(case: &SemanticCase, request: &CanonicalRequest) -> bool {
             || request
                 .reasoning_effort
                 .as_ref()
-                .is_some_and(|effort| case.constraints.efforts.contains(effort)))
+                .is_none_or(|effort| case.constraints.efforts.contains(effort)))
         && case
             .constraints
             .response_format

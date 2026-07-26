@@ -95,7 +95,15 @@ async fn structured_output_keeps_authored_json_bytes() {
         "type": "json_schema",
         "json_schema": {
             "name": "release-status",
-            "schema": {"type": "object"},
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "status": {"enum": ["green", "amber", "red"]},
+                    "blockers": {"type": "integer", "minimum": 0}
+                },
+                "required": ["status", "blockers"],
+                "additionalProperties": false
+            },
             "strict": true
         }
     });
@@ -114,6 +122,64 @@ async fn structured_output_keeps_authored_json_bytes() {
         response["choices"][0]["message"]["content"],
         r#"{"status":"green","blockers":0}"#
     );
+}
+
+#[tokio::test]
+async fn structured_output_must_satisfy_the_requested_schema() {
+    let fixture = fixture(1_000);
+    let mut body = message("mock-gpt-4o", "Report release status.");
+    body["response_format"] = json!({
+        "type": "json_schema",
+        "json_schema": {
+            "name": "release-status",
+            "schema": {
+                "type": "object",
+                "properties": {"status": {"const": "red"}},
+                "required": ["status"]
+            },
+            "strict": true
+        }
+    });
+    let (status, _, text) = send_with_headers(
+        fixture.app,
+        "POST",
+        "/v1/chat/completions",
+        Some(body),
+        &[("x-simulate-case", "structured-output/release-status")],
+    )
+    .await;
+
+    assert_eq!(status, 400);
+    let response = assert_error_envelope(&text);
+    assert_eq!(response["error"]["param"], "response_format");
+    assert_eq!(response["error"]["code"], "semantic_schema_error");
+}
+
+#[tokio::test]
+async fn invalid_requested_schema_fails_before_rendering() {
+    let fixture = fixture(1_000);
+    let mut body = message("mock-gpt-4o", "Report release status.");
+    body["response_format"] = json!({
+        "type": "json_schema",
+        "json_schema": {
+            "name": "release-status",
+            "schema": {"type": 17},
+            "strict": true
+        }
+    });
+    let (status, _, text) = send_with_headers(
+        fixture.app,
+        "POST",
+        "/v1/chat/completions",
+        Some(body),
+        &[("x-simulate-case", "structured-output/release-status")],
+    )
+    .await;
+
+    assert_eq!(status, 400);
+    let response = assert_error_envelope(&text);
+    assert_eq!(response["error"]["param"], "response_format");
+    assert_eq!(response["error"]["code"], "semantic_schema_error");
 }
 
 #[tokio::test]
@@ -173,6 +239,53 @@ async fn incompatible_explicit_variant_is_rejected() {
     assert_eq!(status, 400);
     let response = assert_error_envelope(&text);
     assert_eq!(response["error"]["param"], "x_simulate.variant");
+}
+
+#[tokio::test]
+async fn omitted_effort_uses_the_declared_default_variant() {
+    let fixture = fixture(1_000);
+    let (status, headers, text) = send_with_headers(
+        fixture.app,
+        "POST",
+        "/v1/chat/completions",
+        Some(message("mock-reasoner", "Which release should ship?")),
+        &[("x-simulate-case", "reasoning-effort/release-decision")],
+    )
+    .await;
+
+    assert_eq!(status, 200);
+    let response: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(headers["x-simulate-variant"], "medium");
+    assert_eq!(
+        response["usage"]["completion_tokens_details"]["reasoning_tokens"],
+        16
+    );
+}
+
+#[tokio::test]
+async fn effort_is_rejected_when_the_model_profile_does_not_support_it() {
+    let fixture = fixture(1_000);
+    let body = json!({
+        "model": "mock-gpt-4o",
+        "messages": [
+            {"role": "developer", "content": "Answer in one sentence."},
+            {"role": "user", "content": "Introduce the simulator."}
+        ],
+        "reasoning_effort": "high"
+    });
+    let (status, _, text) = send_with_headers(
+        fixture.app,
+        "POST",
+        "/v1/chat/completions",
+        Some(body),
+        &[("x-simulate-case", "basic-text/concise")],
+    )
+    .await;
+
+    assert_eq!(status, 400);
+    let response = assert_error_envelope(&text);
+    assert_eq!(response["error"]["param"], "reasoning_effort");
+    assert_eq!(response["error"]["code"], "semantic_selection_error");
 }
 
 #[tokio::test]

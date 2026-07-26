@@ -22,11 +22,14 @@ use crate::http::error::{ApiError, not_found_fallback};
 use crate::http::metrics::Metrics;
 use crate::model::{ChatCompletionList, ChatCompletionMessageList, ChatCompletionRequest};
 use crate::models::ModelCatalogue;
+use crate::request_types::ResponseFormat;
 use crate::service::ChatService;
 use crate::service::SemanticDiagnostics;
 use crate::sim::canonical::CanonicalRequest;
 use crate::sim::directive::Directive;
-use crate::sim::plan::{PlanError, SelectionControls, SemanticCapabilities};
+use crate::sim::plan::{
+    PlanError, SelectionControls, SemanticCapabilities, SemanticOutput, SemanticResponsePlan,
+};
 use crate::sim::scenario::{FaultKind, Scenario, Timing};
 use crate::sim::stream::{CancelCounter, StreamPlan, sse_stream};
 use crate::store::{ListFilters, SortOrder};
@@ -422,6 +425,7 @@ async fn create_chat_completion(
             &SemanticCapabilities::from(profile),
         )
         .map_err(semantic_plan_error)?;
+        validate_semantic_schema(&request, &plan)?;
         state
             .service
             .create_semantic_completion(request, &plan)
@@ -513,6 +517,51 @@ fn semantic_plan_error(error: PlanError) -> ApiError {
     ApiError::invalid_request(error.to_string())
         .with_param(param)
         .with_code("semantic_selection_error")
+}
+
+fn validate_semantic_schema(
+    request: &ChatCompletionRequest,
+    plan: &SemanticResponsePlan,
+) -> Result<(), ApiError> {
+    let structured = plan.output.iter().find_map(|output| match output {
+        SemanticOutput::Structured { value, .. } => Some(value),
+        _ => None,
+    });
+    match &request.response_format {
+        Some(ResponseFormat::JsonSchema { json_schema }) => {
+            let schema = json_schema.schema.as_ref().ok_or_else(|| {
+                semantic_schema_error("Invalid response_format: json_schema.schema is required.")
+            })?;
+            let value = structured.ok_or_else(|| {
+                semantic_schema_error(
+                    "The selected semantic variant does not contain structured output.",
+                )
+            })?;
+            let validator = jsonschema::validator_for(schema).map_err(|_| {
+                semantic_schema_error("Invalid response_format: json_schema.schema cannot compile.")
+            })?;
+            if validator.validate(value).is_err() {
+                return Err(semantic_schema_error(
+                    "The selected semantic output does not satisfy response_format.json_schema.",
+                ));
+            }
+        }
+        Some(ResponseFormat::JsonObject) => {
+            if !structured.is_some_and(serde_json::Value::is_object) {
+                return Err(semantic_schema_error(
+                    "The selected semantic variant does not contain a JSON object.",
+                ));
+            }
+        }
+        Some(ResponseFormat::Text) | None => {}
+    }
+    Ok(())
+}
+
+fn semantic_schema_error(message: &str) -> ApiError {
+    ApiError::invalid_request(message)
+        .with_param("response_format")
+        .with_code("semantic_schema_error")
 }
 
 /// Prometheus text exposition; only mounted when --metrics is set.
