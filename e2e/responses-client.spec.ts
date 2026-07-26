@@ -233,3 +233,51 @@ test('official client creates and uses a deterministic conversation resource', a
     deleted: true,
   });
 });
+
+test('official client manages deterministic conversation items', async () => {
+  const conversation = await client.conversations.create({
+    metadata: { suite: 'official-client-conversation-items' },
+    items: [
+      { type: 'message', role: 'user', content: 'First item' },
+      { type: 'message', role: 'assistant', content: 'Second item' },
+    ],
+  });
+
+  const firstPage = await client.conversations.items.list(conversation.id, {
+    order: 'asc',
+    limit: 1,
+  });
+  expect(firstPage.data).toHaveLength(1);
+  expect(firstPage.has_more).toBe(true);
+  expect(firstPage.hasNextPage()).toBe(true);
+
+  const secondPage = await firstPage.getNextPage();
+  expect(secondPage.data).toHaveLength(1);
+  expect(secondPage.has_more).toBe(false);
+  expect(secondPage.hasNextPage()).toBe(false);
+
+  const added = await client.conversations.items.create(conversation.id, {
+    items: [{ type: 'message', role: 'user', content: 'Third item' }],
+  });
+  expect(added.data).toHaveLength(1);
+  const addedItem = added.data[0];
+  expect(addedItem).toBeDefined();
+  if (!addedItem) {
+    throw new Error('conversation item creation returned an empty list');
+  }
+
+  const retrieved = await client.conversations.items.retrieve(addedItem.id, {
+    conversation_id: conversation.id,
+  });
+  expect(retrieved).toEqual(addedItem);
+
+  const afterDelete = await client.conversations.items.delete(addedItem.id, {
+    conversation_id: conversation.id,
+  });
+  expect(afterDelete).toEqual(conversation);
+  await expect(
+    client.conversations.items.retrieve(addedItem.id, {
+      conversation_id: conversation.id,
+    }),
+  ).rejects.toMatchObject({ status: 404 });
+});
