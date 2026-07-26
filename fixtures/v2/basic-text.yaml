@@ -1,0 +1,21 @@
+schema_version: 2
+id: basic-text
+description: Plain text variants shared by Chat Completions and Responses.
+tags: [text, presentation]
+interfaces: [chat_completions, responses]
+match:
+  models: [mock-gpt-4o, mock-gpt-4o-mini]
+  turns:
+    - role: developer
+      text: Answer in one sentence.
+    - role: user
+      text: Introduce the simulator.
+cases:
+  - id: concise
+    constraints:
+      interfaces: [chat_completions, responses]
+    default_variant: default
+    variants:
+      default:
+        answer: no-llm-api replays deterministic, authored model outcomes for client development.
+    terminal: completed

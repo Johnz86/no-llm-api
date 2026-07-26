@@ -1,0 +1,24 @@
+schema_version: 2
+id: structured-output
+description: Strict release status JSON with authored wire bytes and semantic value.
+tags: [text, structured-output]
+interfaces: [chat_completions, responses]
+match:
+  models: [mock-gpt-4o]
+  turns:
+    - role: user
+      text: Report release status.
+requirements:
+  structured_output: true
+cases:
+  - id: release-status
+    constraints:
+      interfaces: [chat_completions, responses]
+      response_format: release-status
+    default_variant: valid
+    variants:
+      valid:
+        structured_output:
+          status: green
+          blockers: 0
+    terminal: completed

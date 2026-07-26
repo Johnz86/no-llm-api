@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use no_llm_api::dataset::write_dataset;
 use no_llm_api::fixtures::{builtin_sets, load_dir};
+use no_llm_api::sim::script::{builtin_fixtures, load_dir as load_semantic_dir};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -34,6 +35,11 @@ enum Command {
     Lint {
         #[arg(long)]
         input: Option<PathBuf>,
+    },
+    /// Check schema-v2 semantic fixtures without compiling legacy parquet.
+    LintSemantic {
+        #[arg(long, default_value = "fixtures/v2")]
+        input: PathBuf,
     },
 }
 
@@ -72,6 +78,17 @@ fn main() -> Result<()> {
                 println!("ok {} ({} turns)", set.id, set.turns.len());
             }
             println!("{} fixture sets pass", sets.len());
+        }
+        Command::LintSemantic { input } => {
+            let fixtures = if input == PathBuf::from("fixtures/v2") {
+                builtin_fixtures()
+            } else {
+                load_semantic_dir(&input)?
+            };
+            for fixture in &fixtures {
+                println!("ok {} ({} cases)", fixture.id, fixture.cases.len());
+            }
+            println!("{} semantic fixtures pass", fixtures.len());
         }
     }
     Ok(())
