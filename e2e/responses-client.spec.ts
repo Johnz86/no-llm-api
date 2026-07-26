@@ -199,3 +199,37 @@ test('official client continues from a stored predecessor', async () => {
   expect(child.usage?.input_tokens).toBeGreaterThan(parent.usage?.total_tokens ?? 0);
   await expect(client.responses.retrieve(child.id)).resolves.toEqual(child);
 });
+
+test('official client creates and uses a deterministic conversation resource', async () => {
+  const conversation = await client.conversations.create({
+    metadata: { suite: 'official-client-conversation' },
+    items: [
+      {
+        type: 'message',
+        role: 'user',
+        content: 'Summarize the release in one paragraph.',
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: 'The release is ready after validation.',
+      },
+    ],
+  });
+  await expect(client.conversations.retrieve(conversation.id)).resolves.toEqual(conversation);
+
+  const response = await client.responses.create({
+    model: 'mock-gpt-4o',
+    input: 'Correction: use exactly five words.',
+    conversation: conversation.id,
+  });
+  expect(response.conversation?.id).toBe(conversation.id);
+  expect(response.output_text).toBe('Release validated; deployment is ready.');
+
+  const deleted = await client.conversations.delete(conversation.id);
+  expect(deleted).toEqual({
+    id: conversation.id,
+    object: 'conversation.deleted',
+    deleted: true,
+  });
+});
