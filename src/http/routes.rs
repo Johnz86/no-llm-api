@@ -783,13 +783,16 @@ async fn delete_conversation(
 fn response_turn(
     response: &crate::responses::ResponseObject,
 ) -> crate::sim::canonical::CanonicalTurn {
-    let refusal = response.output.iter().find_map(|item| match item {
-        ResponseOutputItem::Message { content, .. } => content.iter().find_map(|part| match part {
-            ResponseContentPart::Refusal { refusal } => Some(refusal.clone()),
-            ResponseContentPart::OutputText { .. } => None,
-        }),
-        ResponseOutputItem::Reasoning { .. } => None,
-    });
+    let refusal = response
+        .output
+        .iter()
+        .filter_map(ResponseOutputItem::message_content)
+        .find_map(|content| {
+            content.iter().find_map(|part| match part {
+                ResponseContentPart::Refusal { refusal } => Some(refusal.clone()),
+                ResponseContentPart::OutputText { .. } => None,
+            })
+        });
     let text = if response.output_text.is_empty() {
         refusal.clone().unwrap_or_default()
     } else {

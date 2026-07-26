@@ -99,14 +99,25 @@ pub struct Fault {
 pub enum FaultStage {
     Reasoning,
     Output,
+    Tool,
     Terminal,
 }
 
 impl FaultStage {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Reasoning => "reasoning",
+            Self::Output => "output",
+            Self::Tool => "tool",
+            Self::Terminal => "terminal",
+        }
+    }
+
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "reasoning" => Some(Self::Reasoning),
             "output" => Some(Self::Output),
+            "tool" => Some(Self::Tool),
             "terminal" => Some(Self::Terminal),
             _ => None,
         }
@@ -276,5 +287,18 @@ mod tests {
             assert_eq!(FaultKind::parse(kind.as_str()), Some(kind));
         }
         assert_eq!(FaultKind::parse("nonsense"), None);
+    }
+
+    #[test]
+    fn fault_stages_round_trip_through_extension_safe_labels() {
+        for stage in [
+            FaultStage::Reasoning,
+            FaultStage::Output,
+            FaultStage::Tool,
+            FaultStage::Terminal,
+        ] {
+            assert_eq!(FaultStage::parse(stage.as_str()), Some(stage));
+        }
+        assert_eq!(FaultStage::parse("nonsense"), None);
     }
 }

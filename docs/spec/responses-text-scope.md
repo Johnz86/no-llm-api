@@ -153,6 +153,13 @@ fallback target changes. Identifiers use named FNV-1a digest domains so adding o
 not perturb another. File enumeration, map iteration, request order, counters, wall time, and system
 randomness never participate.
 
+Response output items expose typed identity, kind, and message-content accessors shared by rendering,
+conversation ownership, and routes. Stream schedules carry fault-stage metadata separately from
+their serialized event objects; stage selection never reparses event names. Future item schedulers
+may target the reserved `tool` stage, but must append their own typed events without renumbering or
+renaming existing text/reasoning items. Existing `msg_` and `rs_` identities, output indexes, event
+ordering, and terminal objects are compatibility invariants.
+
 ## Executable corpus
 
 The manifest pins provenance, the official SDK, and all cases. Each case contains the request,

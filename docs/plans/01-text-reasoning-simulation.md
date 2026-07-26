@@ -591,6 +591,11 @@ Exit: all continuation forms, branches, retries, and failures are reproducible u
 
 ### T6: Stabilize the extension boundary
 
+Status: in progress. Output items now expose shared typed identity/kind/content accessors, and the
+stream scheduler carries typed reasoning/output/tool/terminal stage metadata independently from
+wire event names. Text/reasoning identities and event ordering remain covered by contract tests.
+Fixture authoring/migration guidance and final packaging/version review remain pending.
+
 - extract output-item and stage abstractions needed by future tool/MCP/skill and media plans;
 - publish fixture authoring examples, compatibility guarantees, and migration notes;
 - run browser consumers and packaging checks, and review whether the change requires a 2.0.0 wire

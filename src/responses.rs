@@ -215,6 +215,34 @@ pub enum ResponseOutputItem {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponseOutputItemKind {
+    Message,
+    Reasoning,
+}
+
+impl ResponseOutputItem {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Message { id, .. } | Self::Reasoning { id, .. } => id,
+        }
+    }
+
+    pub fn kind(&self) -> ResponseOutputItemKind {
+        match self {
+            Self::Message { .. } => ResponseOutputItemKind::Message,
+            Self::Reasoning { .. } => ResponseOutputItemKind::Reasoning,
+        }
+    }
+
+    pub fn message_content(&self) -> Option<&[ResponseContentPart]> {
+        match self {
+            Self::Message { content, .. } => Some(content),
+            Self::Reasoning { .. } => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ResponseContentPart {
@@ -363,8 +391,9 @@ pub fn render_response_with_context(
         prior_input_tokens + canonical_input_tokens(&request.canonical_request().turns, tokenizer);
     let visible_tokens: u32 = output
         .iter()
-        .map(|item| match item {
-            ResponseOutputItem::Message { content, .. } => content
+        .filter_map(ResponseOutputItem::message_content)
+        .map(|content| {
+            content
                 .iter()
                 .map(|part| match part {
                     ResponseContentPart::OutputText { text, .. } => {
@@ -374,18 +403,14 @@ pub fn render_response_with_context(
                         tokenizer.encode_with_special_tokens(refusal).len() as u32
                     }
                 })
-                .sum(),
-            ResponseOutputItem::Reasoning { .. } => 0,
+                .sum::<u32>()
         })
         .sum();
     let reasoning_tokens = budget.reasoning_tokens;
     let output_tokens = visible_tokens + reasoning_tokens;
     let output_text = output
         .iter()
-        .filter_map(|item| match item {
-            ResponseOutputItem::Message { content, .. } => Some(content),
-            ResponseOutputItem::Reasoning { .. } => None,
-        })
+        .filter_map(ResponseOutputItem::message_content)
         .flatten()
         .filter_map(|part| match part {
             ResponseContentPart::OutputText { text, .. } => Some(text.as_str()),

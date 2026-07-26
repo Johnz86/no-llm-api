@@ -9,8 +9,8 @@ use serde_json::{Map, Value, json};
 use tokio::sync::RwLock;
 
 use crate::responses::{
-    CreateResponseRequest, ResponseInput, ResponseInputItem, ResponseObject, ResponseOutputItem,
-    canonical_input_item,
+    CreateResponseRequest, ResponseInput, ResponseInputItem, ResponseObject,
+    ResponseOutputItemKind, canonical_input_item,
 };
 use crate::sim::canonical::{CanonicalTurn, canonical_json};
 use crate::sim::digest::digest_fields;
@@ -183,11 +183,8 @@ impl ConversationStore {
         let offset = request.canonical_turns().len();
         for (index, output) in response.output.iter().enumerate() {
             let value = serde_json::to_value(output).expect("Response output items serialize");
-            let item_id = value["id"]
-                .as_str()
-                .expect("Response output items have ids")
-                .to_string();
-            let is_message = matches!(output, ResponseOutputItem::Message { .. });
+            let item_id = output.id().to_string();
+            let kind = output.kind();
             record
                 .items
                 .entry(item_id)
@@ -196,8 +193,8 @@ impl ConversationStore {
                     group: response.id.clone(),
                     ordinal: offset + index,
                     value,
-                    turn: is_message.then(|| output_turn.clone()),
-                    reasoning_tokens: if matches!(output, ResponseOutputItem::Reasoning { .. }) {
+                    turn: (kind == ResponseOutputItemKind::Message).then(|| output_turn.clone()),
+                    reasoning_tokens: if kind == ResponseOutputItemKind::Reasoning {
                         response.usage.output_tokens_details.reasoning_tokens
                     } else {
                         0

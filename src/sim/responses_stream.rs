@@ -21,6 +21,7 @@ use crate::sim::stream::token_pieces;
 
 pub struct ResponsesStreamPlan {
     pub events: Vec<Value>,
+    event_stages: Vec<Option<FaultStage>>,
     pub gap: Duration,
     pub ttft: Duration,
     pub jitter_ms: u64,
@@ -42,8 +43,10 @@ impl ResponsesStreamPlan {
             .tokens_per_second
             .and_then(NonZeroU32::new)
             .unwrap_or(rate);
+        let schedule = response_schedule(response, tokenizer);
         Self {
-            events: response_events(response, tokenizer),
+            events: schedule.values,
+            event_stages: schedule.stages,
             gap: Duration::from_secs_f64(1.0 / f64::from(effective_rate.get())),
             ttft: Duration::from_millis(timing.ttft_ms),
             jitter_ms: timing.jitter_ms,
@@ -67,7 +70,7 @@ pub fn responses_sse_stream(
         let mut rng = StdRng::seed_from_u64(plan.seed);
         let fires = plan.fault.kind != FaultKind::None
             && (plan.fault.rate >= 1.0 || rng.random::<f64>() < plan.fault.rate);
-        let trigger_at = responses_fault_trigger_index(&plan.fault, &plan.events);
+        let trigger_at = responses_fault_trigger_index(&plan.fault, &plan.event_stages);
 
         if !plan.ttft.is_zero() {
             tokio::time::sleep(plan.ttft).await;
@@ -145,28 +148,17 @@ fn responses_error_event(sequence_number: usize) -> Event {
     }))
 }
 
-fn responses_fault_trigger_index(fault: &Fault, events: &[Value]) -> usize {
+fn responses_fault_trigger_index(fault: &Fault, stages: &[Option<FaultStage>]) -> usize {
     let Some(stage) = fault.stage else {
         return fault.after_frames.unwrap_or(2) as usize;
     };
     let offset = fault.after_frames.unwrap_or(0) as usize;
-    events
+    stages
         .iter()
         .enumerate()
-        .filter(|(_, event)| response_event_stage(event) == Some(stage))
+        .filter(|(_, event_stage)| **event_stage == Some(stage))
         .nth(offset)
         .map_or(usize::MAX, |(index, _)| index)
-}
-
-fn response_event_stage(event: &Value) -> Option<FaultStage> {
-    match event["type"].as_str() {
-        Some("response.reasoning_summary_text.delta") => Some(FaultStage::Reasoning),
-        Some("response.output_text.delta" | "response.refusal.delta") => Some(FaultStage::Output),
-        Some(
-            "response.completed" | "response.incomplete" | "response.failed" | "response.cancelled",
-        ) => Some(FaultStage::Terminal),
-        _ => None,
-    }
 }
 
 /// Produces the complete ordered event schedule for a Responses stream.
@@ -175,6 +167,10 @@ fn response_event_stage(event: &Value) -> Option<FaultStage> {
 /// event construction pure makes reconstruction and identity invariants
 /// independently testable.
 pub fn response_events(response: &ResponseObject, tokenizer: &CoreBPE) -> Vec<Value> {
+    response_schedule(response, tokenizer).values
+}
+
+fn response_schedule(response: &ResponseObject, tokenizer: &CoreBPE) -> EventSchedule {
     let mut events = EventSchedule::default();
     events.push(json!({
         "type": "response.created",
@@ -211,22 +207,35 @@ pub fn response_events(response: &ResponseObject, tokenizer: &CoreBPE) -> Vec<Va
         }));
     }
 
-    events.push(json!({
-        "type": terminal_event(response.status),
-        "response": response,
-    }));
-    events.values
+    events.push_at(
+        FaultStage::Terminal,
+        json!({
+            "type": terminal_event(response.status),
+            "response": response,
+        }),
+    );
+    events
 }
 
 #[derive(Default)]
 struct EventSchedule {
     values: Vec<Value>,
+    stages: Vec<Option<FaultStage>>,
 }
 
 impl EventSchedule {
-    fn push(&mut self, mut event: Value) {
+    fn push(&mut self, event: Value) {
+        self.push_with_stage(None, event);
+    }
+
+    fn push_at(&mut self, stage: FaultStage, event: Value) {
+        self.push_with_stage(Some(stage), event);
+    }
+
+    fn push_with_stage(&mut self, stage: Option<FaultStage>, mut event: Value) {
         event["sequence_number"] = json!(self.values.len());
         self.values.push(event);
+        self.stages.push(stage);
     }
 }
 
@@ -267,13 +276,16 @@ fn schedule_reasoning(
             "part": {"type": "summary_text", "text": ""},
         }));
         for delta in text_pieces(tokenizer, &part.text) {
-            events.push(json!({
-                "type": "response.reasoning_summary_text.delta",
-                "item_id": item_id,
-                "output_index": output_index,
-                "summary_index": summary_index,
-                "delta": delta,
-            }));
+            events.push_at(
+                FaultStage::Reasoning,
+                json!({
+                    "type": "response.reasoning_summary_text.delta",
+                    "item_id": item_id,
+                    "output_index": output_index,
+                    "summary_index": summary_index,
+                    "delta": delta,
+                }),
+            );
         }
         events.push(json!({
             "type": "response.reasoning_summary_text.done",
@@ -364,14 +376,17 @@ fn schedule_content_part(
         "part": empty_part,
     }));
     for delta in text_pieces(tokenizer, value) {
-        events.push(json!({
-            "type": format!("response.{event_name}.delta"),
-            "item_id": item_id,
-            "output_index": output_index,
-            "content_index": content_index,
-            "delta": delta,
-            "logprobs": [],
-        }));
+        events.push_at(
+            FaultStage::Output,
+            json!({
+                "type": format!("response.{event_name}.delta"),
+                "item_id": item_id,
+                "output_index": output_index,
+                "content_index": content_index,
+                "delta": delta,
+                "logprobs": [],
+            }),
+        );
     }
     events.push(json!({
         "type": format!("response.{event_name}.done"),

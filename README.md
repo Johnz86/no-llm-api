@@ -122,7 +122,7 @@ curl -N http://127.0.0.1:8080/v1/chat/completions \
 
 Recognised directives: `fault` (`stall`, `drop`, `sse_error`, `http_error`, `slow_then_recover`)
 with `status`, `retry_after`, `after_ms`, `after_frames`, `rate`, and optional `stage`
-(`reasoning`, `output`, or `terminal`); plus `ttft_ms`,
+(`reasoning`, `output`, `tool`, or `terminal`); plus `ttft_ms`,
 `tokens_per_second`, `jitter_ms`, `chunk_tokens` and `burst_frames`.
 
 Schema-v2 text, reasoning, and structured-output cases are selected explicitly with
