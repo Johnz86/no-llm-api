@@ -23,13 +23,15 @@ fn the_extract_covers_every_path_the_mock_implements() {
         "/models/{model}",
         "/responses",
         "/responses/{response_id}",
+        "/conversations",
+        "/conversations/{conversation_id}",
     ] {
         assert!(
             paths.contains_key(Value::String(path.to_string())),
             "{path} is missing from {EXTRACT}"
         );
     }
-    assert_eq!(paths.len(), 7, "the extract must stay pruned");
+    assert_eq!(paths.len(), 9, "the extract must stay pruned");
 }
 
 #[test]

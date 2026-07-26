@@ -16,6 +16,7 @@ use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer, Expos
 use uuid::Uuid;
 
 use crate::config::{AuthSettings, ControlPlaneSettings, CorsSettings};
+use crate::conversations::{ConversationStore, CreateConversationRequest};
 use crate::http::auth;
 use crate::http::control::{self, RequestLog};
 use crate::http::error::{ApiError, not_found_fallback};
@@ -25,7 +26,7 @@ use crate::models::ModelCatalogue;
 use crate::request_types::ResponseFormat;
 use crate::responses::{
     CreateResponseRequest, ResponseContentPart, ResponseInput, ResponseOutputItem,
-    ResponseTextFormat, render_response_with_context,
+    ResponseTextFormat, canonical_input_tokens, render_response_with_context,
 };
 use crate::service::ChatService;
 use crate::service::SemanticDiagnostics;
@@ -59,6 +60,7 @@ pub struct AppState {
     pub models: ModelCatalogue,
     pub semantic: Arc<SemanticArtifact>,
     pub responses: ResponseStore,
+    pub conversations: ConversationStore,
     /// The live behaviour profile, swappable through the control plane.
     pub scenario: Arc<ArcSwap<Scenario>>,
     /// The profile the process started with, restored by `POST /_mock/reset`.
@@ -119,6 +121,7 @@ pub fn build_router_with_options(
         models: options.models,
         semantic: builtin_artifact(),
         responses: ResponseStore::new(),
+        conversations: ConversationStore::default(),
         scenario: Arc::new(ArcSwap::new(boot_scenario.clone())),
         boot_scenario,
         seed: options.seed,
@@ -146,6 +149,11 @@ pub fn build_router_with_options(
         .route(
             "/responses/{response_id}",
             get(get_response).delete(delete_response),
+        )
+        .route("/conversations", post(create_conversation))
+        .route(
+            "/conversations/{conversation_id}",
+            get(get_conversation).delete(delete_conversation),
         )
         .route("/models", get(list_models))
         .route("/models/{model_id}", get(get_model))
@@ -534,6 +542,22 @@ async fn create_response(
     } else {
         None
     };
+    let conversation = if let Some(conversation) = request.conversation.as_ref() {
+        let id = conversation.id();
+        let snapshot = state.conversations.snapshot(id).await.ok_or_else(|| {
+            ApiError::not_found(id)
+                .with_param("conversation")
+                .with_code("conversation_not_found")
+        })?;
+        canonical.turns.splice(0..0, snapshot.turns.clone());
+        canonical.context = Some(serde_json::json!({
+            "conversation": snapshot.resource,
+            "response_ids": snapshot.response_ids,
+        }));
+        Some(snapshot)
+    } else {
+        None
+    };
     let controls = state
         .semantic
         .selection_controls(directive.case.clone(), directive.variant.clone());
@@ -551,7 +575,14 @@ async fn create_response(
         state.service.tokenizer().as_ref(),
         prior
             .as_ref()
-            .map_or(0, |stored| stored.response.usage.total_tokens),
+            .map(|stored| stored.response.usage.total_tokens)
+            .or_else(|| {
+                conversation.as_ref().map(|snapshot| {
+                    canonical_input_tokens(&snapshot.turns, state.service.tokenizer().as_ref())
+                        + snapshot.reasoning_tokens
+                })
+            })
+            .unwrap_or(0),
     );
     let scenario = state.scenario.load_full();
     let base = model_timing(&state, &request.model).unwrap_or_else(|| scenario.timing.clone());
@@ -574,6 +605,19 @@ async fn create_response(
         let mut turns = canonical.turns.clone();
         turns.push(response_turn(&response));
         state.responses.save(response.clone(), turns).await;
+    }
+    if let Some(conversation) = conversation {
+        let mut exchange = request.canonical_turns();
+        exchange.push(response_turn(&response));
+        state
+            .conversations
+            .append(
+                &conversation.resource.id,
+                response.id.clone(),
+                exchange,
+                response.usage.output_tokens_details.reasoning_tokens,
+            )
+            .await;
     }
 
     let diagnostics = SemanticDiagnostics {
@@ -620,6 +664,50 @@ async fn create_response(
     );
     insert_semantic_headers(wire.headers_mut(), Some(&diagnostics));
     Ok(wire)
+}
+
+async fn create_conversation(
+    State(state): State<AppState>,
+    body: Result<Json<CreateConversationRequest>, axum::extract::rejection::JsonRejection>,
+) -> Result<Response, ApiError> {
+    let Json(request) = body?;
+    if request.items.len() > 20 {
+        return Err(ApiError::invalid_request(
+            "Invalid value for 'items': at most 20 initial items are allowed.",
+        )
+        .with_param("items")
+        .with_code("invalid_value"));
+    }
+    let turns = request
+        .items
+        .iter()
+        .map(crate::responses::canonical_input_item)
+        .collect();
+    Ok(Json(state.conversations.create(&request, turns).await).into_response())
+}
+
+async fn get_conversation(
+    State(state): State<AppState>,
+    Path(conversation_id): Path<String>,
+) -> Result<Response, ApiError> {
+    state
+        .conversations
+        .get(&conversation_id)
+        .await
+        .map(|conversation| Json(conversation).into_response())
+        .ok_or_else(|| ApiError::not_found(&conversation_id))
+}
+
+async fn delete_conversation(
+    State(state): State<AppState>,
+    Path(conversation_id): Path<String>,
+) -> Result<Response, ApiError> {
+    state
+        .conversations
+        .delete(&conversation_id)
+        .await
+        .map(|conversation| Json(conversation).into_response())
+        .ok_or_else(|| ApiError::not_found(&conversation_id))
 }
 
 fn response_turn(
@@ -688,6 +776,13 @@ fn validate_response_request(request: &CreateResponseRequest) -> Result<(), ApiE
         )
         .with_param("tools")
         .with_code("unsupported_parameter"));
+    }
+    if request.previous_response_id.is_some() && request.conversation.is_some() {
+        return Err(ApiError::invalid_request(
+            "'previous_response_id' and 'conversation' cannot be used together.",
+        )
+        .with_param("conversation")
+        .with_code("invalid_value"));
     }
     if request.max_output_tokens.is_some_and(|limit| limit < 16) {
         return Err(ApiError::invalid_request(

@@ -153,6 +153,7 @@ async fn reset(State(state): State<AppState>) -> impl IntoResponse {
     state.scenario.store(state.boot_scenario.clone());
     state.log.clear();
     state.responses.clear().await;
+    state.conversations.clear().await;
     Json(state.boot_scenario.as_ref().clone())
 }
 

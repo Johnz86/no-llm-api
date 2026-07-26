@@ -1,4 +1,5 @@
 pub mod config;
+pub mod conversations;
 pub mod dataset;
 pub mod fixtures;
 pub mod http;

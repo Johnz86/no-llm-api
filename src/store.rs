@@ -38,6 +38,7 @@ pub struct ResponseStateView {
     pub model: String,
     pub status: crate::responses::ResponseStatus,
     pub previous_response_id: Option<String>,
+    pub conversation_id: Option<String>,
     pub output_items: usize,
     pub canonical_turns: usize,
 }
@@ -87,6 +88,11 @@ impl ResponseStore {
                 model: stored.response.model.clone(),
                 status: stored.response.status,
                 previous_response_id: stored.response.previous_response_id.clone(),
+                conversation_id: stored
+                    .response
+                    .conversation
+                    .as_ref()
+                    .map(|conversation| conversation.id.clone()),
                 output_items: stored.response.output.len(),
                 canonical_turns: stored.turns.len(),
             })

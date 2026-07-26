@@ -111,6 +111,10 @@ and the parsed value separately so byte reconstruction and semantic validation r
 - `GET /_mock/responses` exposes only sorted response identity, model, status, linkage, and aggregate
   item/turn counts. It never returns input, output text, reasoning, metadata, or credentials.
   `POST /_mock/reset` clears this process-local state together with the request log.
+- Conversation resources use deterministic content-derived `conv_` identities. A Response can
+  reference the resource by string or `{id}`; its existing turns are prepended during planning and
+  the completed input/output exchange is appended under the deterministic response id. Exchanges
+  are ordered by id rather than arrival time, so concurrent appends cannot perturb later context.
 - `previous_response_id` requires an available immutable stored predecessor. The predecessor's
   canonical turns are prepended for semantic matching and its complete public object participates
   in child plan identity, so branches require no counters or request ordering. Missing and deleted

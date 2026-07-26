@@ -312,6 +312,10 @@ The server mirrors the primary Chat Completions endpoints, exposed both at the r
 - `GET /chat/completions/{completion_id}/messages`
 - `GET /models`
 - `GET /models/{model_id}`
+- `POST /responses`
+- `GET` and `DELETE /responses/{response_id}`
+- `POST /conversations`
+- `GET` and `DELETE /conversations/{conversation_id}`
 - `GET /health` and `GET /ready` (unversioned)
 
 `GET /` is also unversioned and serves the bundled test page. The page is embedded in the binary, so

@@ -24,7 +24,8 @@ usage, and terminate incomplete streams through the same event state machine. Mi
 remain in progress/future work. T5 currently provides immutable process-local storage, retrieval,
 deletion, and counter-free `previous_response_id` continuation with cumulative input accounting;
 the redacted control-plane state view is sorted by response id, and reset clears all process-local
-Responses state. Conversation resources and tools are not implemented yet.
+Responses state. Deterministic conversation resources own automatically appended response turn
+logs; conversation item routes and tools are not implemented yet.
 
 The first future delivery stays text-first. It establishes the shared item model, deterministic
 reasoning policy, state transitions, scenario vocabulary, and validation rules that later tool,
@@ -578,7 +579,8 @@ Exit: streamed and non-streamed semantic objects are equivalent for the full sce
 
 Status: immutable process-local response storage, retrieval, deletion, and deterministic predecessor
 continuation complete. Redacted diagnostics and reset semantics are complete; conversation logs,
-expiry, and conversation-id semantics remain pending.
+resource lifecycle, deterministic exchange ordering, and automatic turn appends are complete.
+Conversation item routes and explicit expiry remain pending.
 
 - add response store, `previous_response_id`, conversation logs, replayed items, reset/deletion,
   deterministic expiry scenarios, branching, and concurrency semantics;

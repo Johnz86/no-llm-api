@@ -33,6 +33,8 @@ pub struct CreateResponseRequest {
     #[serde(default)]
     pub previous_response_id: Option<String>,
     #[serde(default)]
+    pub conversation: Option<ResponseConversationParam>,
+    #[serde(default)]
     pub parallel_tool_calls: bool,
     #[serde(default)]
     pub tools: Vec<Value>,
@@ -47,7 +49,7 @@ pub enum ResponseInput {
     Items(Vec<ResponseInputItem>),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ResponseInputItem {
     Message {
@@ -56,26 +58,46 @@ pub enum ResponseInputItem {
     },
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ResponseInputContent {
     Text(String),
     Parts(Vec<ResponseInputPart>),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ResponseInputPart {
     InputText { text: String },
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResponseRole {
     User,
     Assistant,
     System,
     Developer,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum ResponseConversationParam {
+    Id(String),
+    Object { id: String },
+}
+
+impl ResponseConversationParam {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Id(id) | Self::Object { id } => id,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ResponseConversation {
+    pub id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -140,6 +162,7 @@ pub struct ResponseObject {
     pub temperature: Option<f32>,
     pub tool_choice: Value,
     pub previous_response_id: Option<String>,
+    pub conversation: Option<ResponseConversation>,
     pub reasoning: Option<ResponseReasoningConfig>,
     pub store: bool,
     pub text: ResponseTextSettings,
@@ -336,21 +359,8 @@ pub fn render_response_with_context(
         });
     }
 
-    let input_tokens = prior_input_tokens
-        + request
-            .canonical_request()
-            .turns
-            .iter()
-            .map(|turn| match &turn.content {
-                CanonicalContent::Text(text) => {
-                    tokenizer.encode_with_special_tokens(text).len() as u32
-                }
-                CanonicalContent::Empty => 0,
-                CanonicalContent::Parts(value) => tokenizer
-                    .encode_with_special_tokens(&value.to_string())
-                    .len() as u32,
-            })
-            .sum::<u32>();
+    let input_tokens =
+        prior_input_tokens + canonical_input_tokens(&request.canonical_request().turns, tokenizer);
     let visible_tokens: u32 = output
         .iter()
         .map(|item| match item {
@@ -399,6 +409,12 @@ pub fn render_response_with_context(
         temperature: None,
         tool_choice: Value::String("auto".to_string()),
         previous_response_id: request.previous_response_id.clone(),
+        conversation: request
+            .conversation
+            .as_ref()
+            .map(|conversation| ResponseConversation {
+                id: conversation.id().to_string(),
+            }),
         reasoning: request.reasoning.clone(),
         store: request.store,
         text: response_text_settings(request.text.as_ref()),
@@ -595,7 +611,7 @@ impl CreateResponseRequest {
         }
     }
 
-    fn canonical_turns(&self) -> Vec<CanonicalTurn> {
+    pub(crate) fn canonical_turns(&self) -> Vec<CanonicalTurn> {
         match &self.input {
             ResponseInput::Text(text) => vec![canonical_turn("user", text)],
             ResponseInput::Items(items) => items
@@ -646,6 +662,27 @@ fn canonical_turn(role: &str, text: &str) -> CanonicalTurn {
         audio: None,
         refusal: None,
     }
+}
+
+pub(crate) fn canonical_input_item(item: &ResponseInputItem) -> CanonicalTurn {
+    match item {
+        ResponseInputItem::Message { role, content } => {
+            canonical_turn(role.as_str(), &content.text())
+        }
+    }
+}
+
+pub(crate) fn canonical_input_tokens(turns: &[CanonicalTurn], tokenizer: &CoreBPE) -> u32 {
+    turns
+        .iter()
+        .map(|turn| match &turn.content {
+            CanonicalContent::Text(text) => tokenizer.encode_with_special_tokens(text).len() as u32,
+            CanonicalContent::Empty => 0,
+            CanonicalContent::Parts(value) => tokenizer
+                .encode_with_special_tokens(&value.to_string())
+                .len() as u32,
+        })
+        .sum()
 }
 
 #[cfg(test)]

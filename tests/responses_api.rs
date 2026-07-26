@@ -381,6 +381,179 @@ async fn state_diagnostics_are_redacted_sorted_and_reset_clears_storage() {
 }
 
 #[tokio::test]
+async fn conversation_resource_owns_an_automatically_appended_turn_log() {
+    let fixture = fixture(10_000);
+    let request = json!({"metadata": {"suite": "conversation-state"}});
+    let (status, _, created_text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/conversations",
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let conversation: Value = serde_json::from_str(&created_text).unwrap();
+    assert_eq!(conversation["object"], "conversation");
+    assert!(conversation["id"].as_str().unwrap().starts_with("conv_"));
+
+    let (_, _, duplicate_text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/conversations",
+        Some(request),
+    )
+    .await;
+    assert_eq!(duplicate_text, created_text);
+
+    let conversation_id = conversation["id"].as_str().unwrap();
+    let (status, _, parent_text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": "Summarize the release in one paragraph.",
+            "conversation": conversation_id
+        })),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let parent: Value = serde_json::from_str(&parent_text).unwrap();
+    assert_eq!(parent["conversation"]["id"], conversation_id);
+
+    let (status, headers, child_text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": "Correction: use exactly five words.",
+            "conversation": {"id": conversation_id}
+        })),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(headers["x-simulate-match"], "exact");
+    let child: Value = serde_json::from_str(&child_text).unwrap();
+    assert_eq!(
+        child["output_text"],
+        "Release validated; deployment is ready."
+    );
+    assert_eq!(child["conversation"]["id"], conversation_id);
+    assert!(
+        child["usage"]["input_tokens"].as_u64().unwrap()
+            > parent["usage"]["total_tokens"].as_u64().unwrap()
+    );
+
+    let (status, _, retrieved) = send(
+        fixture.app.clone(),
+        "GET",
+        &format!("/v1/conversations/{conversation_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(retrieved, created_text);
+
+    let (status, _, deleted) = send(
+        fixture.app.clone(),
+        "DELETE",
+        &format!("/v1/conversations/{conversation_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        serde_json::from_str::<Value>(&deleted).unwrap(),
+        json!({"id": conversation_id, "object": "conversation.deleted", "deleted": true})
+    );
+
+    let (status, _, missing) = send(
+        fixture.app,
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": "Correction: use exactly five words.",
+            "conversation": conversation_id
+        })),
+    )
+    .await;
+    assert_eq!(status, 404);
+    assert_eq!(
+        assert_error_envelope(&missing)["error"]["code"],
+        "conversation_not_found"
+    );
+}
+
+#[tokio::test]
+async fn conversation_and_predecessor_linkage_are_mutually_exclusive() {
+    let fixture = fixture(10_000);
+    let (status, _, text) = send(
+        fixture.app,
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": "hello",
+            "conversation": "conv_test",
+            "previous_response_id": "resp_test"
+        })),
+    )
+    .await;
+
+    assert_eq!(status, 400);
+    let error = assert_error_envelope(&text);
+    assert_eq!(error["error"]["param"], "conversation");
+    assert_eq!(error["error"]["code"], "invalid_value");
+}
+
+#[tokio::test]
+async fn initial_conversation_items_seed_semantic_history() {
+    let fixture = fixture(10_000);
+    let (status, _, text) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/conversations",
+        Some(json!({
+            "items": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": "Summarize the release in one paragraph."
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": "The release is ready after validation."
+                }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let conversation: Value = serde_json::from_str(&text).unwrap();
+
+    let (status, headers, response) = send(
+        fixture.app,
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": "Correction: use exactly five words.",
+            "conversation": conversation["id"]
+        })),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(headers["x-simulate-match"], "exact");
+    assert_eq!(
+        serde_json::from_str::<Value>(&response).unwrap()["output_text"],
+        "Release validated; deployment is ready."
+    );
+}
+
+#[tokio::test]
 async fn output_budget_is_spent_on_reasoning_before_visible_text() {
     for (limit, expected_reasoning, expect_text) in
         [(16, 16, false), (28, 28, false), (30, 28, true)]
