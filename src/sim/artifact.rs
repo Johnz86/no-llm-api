@@ -1,6 +1,6 @@
 //! Deterministic compilation of schema-v2 fixtures into a portable JSON artifact.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ use crate::sim::script::{
     Interface, SCHEMA_VERSION, SemanticCase, SemanticFixture, SemanticFixtureError, SemanticRole,
 };
 
-pub const COMPILER_VERSION: &str = "semantic-compiler-v1";
+pub const COMPILER_VERSION: &str = "semantic-compiler-v2";
 pub const SELECTION_VERSION: &str = "semantic-selection-v1";
 pub const TOKENIZER_REVISION: &str = "cl100k_base@tiktoken-rs-0.12.0";
 
@@ -36,6 +36,18 @@ pub struct CompiledVariant {
     pub output: Vec<SemanticOutput>,
     pub reasoning_tokens: u32,
     pub visible_tokens: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CompatibilityReport {
+    pub compatible: bool,
+    pub baseline_digest: String,
+    pub candidate_digest: String,
+    pub fallback_assignment_changes: Vec<String>,
+    pub changed_variant_bytes: Vec<String>,
+    pub removed_variants: Vec<String>,
+    pub added_variants: Vec<String>,
+    pub legacy_byte_changes: Vec<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -118,6 +130,94 @@ impl SemanticArtifact {
             ..Default::default()
         }
     }
+
+    pub fn compatibility_report(&self, candidate: &Self) -> CompatibilityReport {
+        let baseline_fallbacks = fallback_assignments(&self.fixtures);
+        let candidate_fallbacks = fallback_assignments(&candidate.fixtures);
+        let fallback_assignment_changes =
+            changed_map_keys(&baseline_fallbacks, &candidate_fallbacks);
+        let baseline_variants = variant_bytes(self);
+        let candidate_variants = variant_bytes(candidate);
+        let removed_variants = baseline_variants
+            .keys()
+            .filter(|key| !candidate_variants.contains_key(*key))
+            .cloned()
+            .collect::<Vec<_>>();
+        let added_variants = candidate_variants
+            .keys()
+            .filter(|key| !baseline_variants.contains_key(*key))
+            .cloned()
+            .collect::<Vec<_>>();
+        let changed_variant_bytes = changed_map_keys(&baseline_variants, &candidate_variants);
+        let legacy_byte_changes = changed_variant_bytes
+            .iter()
+            .chain(removed_variants.iter())
+            .filter(|selector| selector.starts_with("legacy-"))
+            .cloned()
+            .collect::<Vec<_>>();
+        let compatible = fallback_assignment_changes.is_empty()
+            && changed_variant_bytes.is_empty()
+            && removed_variants.is_empty()
+            && legacy_byte_changes.is_empty();
+        CompatibilityReport {
+            compatible,
+            baseline_digest: self.digest(),
+            candidate_digest: candidate.digest(),
+            fallback_assignment_changes,
+            changed_variant_bytes,
+            removed_variants,
+            added_variants,
+            legacy_byte_changes,
+        }
+    }
+}
+
+fn fallback_assignments(fixtures: &[SemanticFixture]) -> BTreeMap<String, String> {
+    fixtures
+        .iter()
+        .flat_map(|fixture| {
+            fixture.cases.iter().map(move |case| {
+                (
+                    format!("{}/{}", fixture.id, case.id),
+                    canonical_json(&serde_json::json!({
+                        "match_signature": match_signature(fixture, case),
+                        "default": case.default_variant,
+                        "fallback": case.fallback_variant,
+                    })),
+                )
+            })
+        })
+        .collect()
+}
+
+fn variant_bytes(artifact: &SemanticArtifact) -> BTreeMap<String, String> {
+    artifact
+        .variants
+        .iter()
+        .map(|variant| {
+            (
+                variant.selector.clone(),
+                canonical_json(
+                    &serde_json::to_value(&variant.output).expect("compiled output serializes"),
+                ),
+            )
+        })
+        .collect()
+}
+
+fn changed_map_keys<T: PartialEq>(
+    baseline: &BTreeMap<String, T>,
+    candidate: &BTreeMap<String, T>,
+) -> Vec<String> {
+    baseline
+        .iter()
+        .filter(|(key, value)| {
+            candidate
+                .get(*key)
+                .is_some_and(|candidate| candidate != *value)
+        })
+        .map(|(key, _)| key.clone())
+        .collect()
 }
 
 pub fn builtin_artifact() -> Arc<SemanticArtifact> {
@@ -453,5 +553,40 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(error, ArtifactError::AmbiguousCases { .. }));
+    }
+
+    #[test]
+    fn compatibility_report_allows_additions_and_detects_contract_drift() {
+        let baseline = artifact(&builtin_fixtures());
+        let mut added = builtin_fixtures();
+        let basic = added
+            .iter_mut()
+            .find(|fixture| fixture.id == "basic-text")
+            .unwrap();
+        let additional = basic.cases[0].variants["default"].clone();
+        basic.cases[0]
+            .variants
+            .insert("additional".to_string(), additional);
+        let candidate = artifact(&added);
+        let report = baseline.compatibility_report(&candidate);
+        assert!(report.compatible);
+        assert_eq!(report.added_variants, ["basic-text/concise/additional"]);
+
+        let mut changed = builtin_fixtures();
+        changed
+            .iter_mut()
+            .find(|fixture| fixture.id == "legacy-markdown")
+            .unwrap()
+            .cases[0]
+            .variants
+            .get_mut("imported")
+            .unwrap()
+            .answer = Some("changed".to_string());
+        let report = baseline.compatibility_report(&artifact(&changed));
+        assert!(!report.compatible);
+        assert_eq!(
+            report.legacy_byte_changes,
+            ["legacy-markdown/deployment-checklist/imported"]
+        );
     }
 }

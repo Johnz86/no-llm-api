@@ -167,6 +167,10 @@ pub struct OutcomeVariant {
 #[serde(deny_unknown_fields)]
 pub struct StructuredOutput {
     pub json: String,
+    #[serde(default)]
+    pub schema: Value,
+    #[serde(default)]
+    pub negative: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -281,6 +285,24 @@ impl SemanticFixture {
             for (variant_id, variant) in &case.variants {
                 lint_id(self, format!("{base}.variants.{variant_id}"), variant_id)?;
                 lint_variant(self, &base, variant_id, variant)?;
+            }
+            for protected in [
+                Some(case.default_variant.as_str()),
+                case.fallback_variant.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if case.variants[protected]
+                    .structured_output
+                    .as_ref()
+                    .is_some_and(|output| output.negative)
+                {
+                    return self.fail(
+                        format!("{base}.default_variant"),
+                        "negative structured variants cannot be defaults or fallbacks",
+                    );
+                }
             }
             let has_reasoning = case.variants.values().any(|variant| {
                 variant.reasoning_summary.is_some()
@@ -508,13 +530,115 @@ fn lint_variant(
             "answer, refusal, and structured_output are mutually exclusive",
         );
     }
-    if let Some(structured) = &variant.structured_output
-        && serde_json::from_str::<Value>(&structured.json).is_err()
+    if let Some(structured) = &variant.structured_output {
+        let value = serde_json::from_str::<Value>(&structured.json).map_err(|_| {
+            SemanticFixtureError::Lint {
+                fixture: fixture.id.clone(),
+                path: format!("{path}.structured_output.json"),
+                message: "must contain valid JSON bytes".to_string(),
+            }
+        })?;
+        if structured.negative != id.starts_with("negative-") {
+            return fixture.fail(
+                format!("{path}.structured_output.negative"),
+                "must be true exactly for variants whose id starts with 'negative-'",
+            );
+        }
+        lint_owned_schema(fixture, &path, &structured.schema)?;
+        let validator = jsonschema::validator_for(&structured.schema).map_err(|_| {
+            SemanticFixtureError::Lint {
+                fixture: fixture.id.clone(),
+                path: format!("{path}.structured_output.schema"),
+                message: "must compile as a self-contained JSON Schema".to_string(),
+            }
+        })?;
+        let valid = validator.is_valid(&value);
+        if valid == structured.negative {
+            return fixture.fail(
+                format!("{path}.structured_output.json"),
+                if structured.negative {
+                    "negative structured output must violate its owned schema"
+                } else {
+                    "must satisfy its owned schema"
+                },
+            );
+        }
+    }
+    Ok(())
+}
+
+fn lint_owned_schema(
+    fixture: &SemanticFixture,
+    path: &str,
+    schema: &Value,
+) -> Result<(), SemanticFixtureError> {
+    const ALLOWED: &[&str] = &[
+        "$defs",
+        "$ref",
+        "additionalProperties",
+        "allOf",
+        "anyOf",
+        "const",
+        "description",
+        "enum",
+        "format",
+        "items",
+        "maxItems",
+        "maxLength",
+        "maximum",
+        "minItems",
+        "minLength",
+        "minimum",
+        "not",
+        "oneOf",
+        "pattern",
+        "properties",
+        "required",
+        "title",
+        "type",
+    ];
+    let Value::Object(object) = schema else {
+        return fixture.fail(
+            format!("{path}.structured_output.schema"),
+            "must be a JSON Schema object",
+        );
+    };
+    for key in object.keys() {
+        if !ALLOWED.contains(&key.as_str()) {
+            return fixture.fail(
+                format!("{path}.structured_output.schema.{key}"),
+                "uses an unsupported schema keyword",
+            );
+        }
+    }
+    if let Some(reference) = object.get("$ref").and_then(Value::as_str)
+        && !reference.starts_with('#')
     {
         return fixture.fail(
-            format!("{path}.structured_output.json"),
-            "must contain valid JSON bytes",
+            format!("{path}.structured_output.schema.$ref"),
+            "remote schema references are not supported",
         );
+    }
+    for key in ["additionalProperties", "items", "not"] {
+        if let Some(child) = object.get(key)
+            && child.is_object()
+        {
+            lint_owned_schema(fixture, path, child)?;
+        }
+    }
+    for key in ["allOf", "anyOf", "oneOf"] {
+        if let Some(children) = object.get(key).and_then(Value::as_array) {
+            for child in children {
+                lint_owned_schema(fixture, path, child)?;
+            }
+        }
+    }
+    for key in ["$defs", "properties"] {
+        if let Some(children) = object.get(key).and_then(Value::as_object) {
+            for child in children.values() {
+                lint_owned_schema(fixture, path, child)?;
+            }
+        }
     }
     Ok(())
 }
@@ -689,5 +813,65 @@ cases:
         );
         let fixture = SemanticFixture::from_yaml("test", &yaml).unwrap();
         fixture.lint().unwrap();
+    }
+
+    #[test]
+    fn structured_variants_own_and_enforce_supported_schemas() {
+        let mut fixture = builtin_fixtures()
+            .into_iter()
+            .find(|fixture| fixture.id == "structured-output")
+            .unwrap();
+        let case = &mut fixture.cases[0];
+        let valid = case
+            .variants
+            .get_mut("valid")
+            .unwrap()
+            .structured_output
+            .as_mut()
+            .unwrap();
+        valid.schema["unevaluatedProperties"] = Value::Bool(false);
+        let error = fixture.lint().unwrap_err().to_string();
+        assert!(error.contains("unsupported schema keyword"), "{error}");
+
+        let mut fixture = builtin_fixtures()
+            .into_iter()
+            .find(|fixture| fixture.id == "structured-output")
+            .unwrap();
+        fixture.cases[0]
+            .variants
+            .get_mut("valid")
+            .unwrap()
+            .structured_output
+            .as_mut()
+            .unwrap()
+            .json = r#"{"status":"green"}"#.to_string();
+        let error = fixture.lint().unwrap_err().to_string();
+        assert!(error.contains("must satisfy its owned schema"), "{error}");
+    }
+
+    #[test]
+    fn negative_structured_variants_are_named_invalid_and_never_defaults() {
+        let mut fixture = builtin_fixtures()
+            .into_iter()
+            .find(|fixture| fixture.id == "structured-output")
+            .unwrap();
+        fixture.cases[0].default_variant = "negative-missing-blockers".to_string();
+        let error = fixture.lint().unwrap_err().to_string();
+        assert!(error.contains("cannot be defaults"), "{error}");
+
+        let mut fixture = builtin_fixtures()
+            .into_iter()
+            .find(|fixture| fixture.id == "structured-output")
+            .unwrap();
+        fixture.cases[0]
+            .variants
+            .get_mut("negative-missing-blockers")
+            .unwrap()
+            .structured_output
+            .as_mut()
+            .unwrap()
+            .json = r#"{"status":"green","blockers":0}"#.to_string();
+        let error = fixture.lint().unwrap_err().to_string();
+        assert!(error.contains("must violate its owned schema"), "{error}");
     }
 }

@@ -293,6 +293,37 @@ async fn schema_mismatch_uses_the_common_error_envelope() {
 }
 
 #[tokio::test]
+async fn explicitly_selected_negative_structured_variant_fails_at_runtime() {
+    let fixture = fixture(10_000);
+    let body = json!({
+        "model": "mock-gpt-4o",
+        "input": "Report release status.",
+        "text": {"format": {
+            "type": "json_schema",
+            "name": "release-status",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string"},
+                    "blockers": {"type": "integer"}
+                },
+                "required": ["status", "blockers"]
+            }
+        }},
+        "x_simulate": {
+            "case": "structured-output/release-status",
+            "variant": "negative-missing-blockers"
+        }
+    });
+    let (status, _, text) = send(fixture.app, "POST", "/v1/responses", Some(body)).await;
+
+    assert_eq!(status, 400, "{text}");
+    let response = assert_error_envelope(&text);
+    assert_eq!(response["error"]["param"], "text.format");
+    assert_eq!(response["error"]["code"], "semantic_schema_error");
+}
+
+#[tokio::test]
 async fn unsupported_future_controls_fail_explicitly() {
     for (field, value) in [("tools", json!([{"type": "function"}]))] {
         let fixture = fixture(1_000);

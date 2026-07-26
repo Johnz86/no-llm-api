@@ -84,6 +84,13 @@ enum Command {
         #[arg(long)]
         variant: Option<String>,
     },
+    /// Compare two compiled semantic artifacts and fail on compatibility drift.
+    CompatibilityReport {
+        #[arg(long)]
+        baseline: PathBuf,
+        #[arg(long)]
+        candidate: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -184,8 +191,25 @@ fn main() -> Result<()> {
             let plan = semantic_plan(&request, input, models, case, variant)?;
             println!("{}", serde_json::to_string_pretty(&plan)?);
         }
+        Command::CompatibilityReport {
+            baseline,
+            candidate,
+        } => {
+            let baseline = read_semantic_artifact(&baseline)?;
+            let candidate = read_semantic_artifact(&candidate)?;
+            let report = baseline.compatibility_report(&candidate);
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if !report.compatible {
+                anyhow::bail!("semantic artifact compatibility check failed");
+            }
+        }
     }
     Ok(())
+}
+
+fn read_semantic_artifact(path: &PathBuf) -> Result<SemanticArtifact> {
+    let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    serde_json::from_slice(&bytes).with_context(|| format!("parsing {}", path.display()))
 }
 
 fn semantic_fixtures(

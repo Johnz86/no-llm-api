@@ -19,3 +19,14 @@ cases:
       imported:
         structured_output:
           json: '{"release":"2026.7.1","status":"green","open_defects":0,"owners":["ops","qa"]}'
+          schema:
+            type: object
+            properties:
+              release: {type: string}
+              status: {type: string}
+              open_defects: {type: integer, minimum: 0}
+              owners:
+                type: array
+                items: {type: string}
+            required: [release, status, open_defects, owners]
+            additionalProperties: false

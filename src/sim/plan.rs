@@ -448,7 +448,7 @@ pub(crate) fn output_nodes(
         output.push(SemanticOutput::Text { text: text.clone() });
     } else if let Some(text) = &variant.refusal {
         output.push(SemanticOutput::Refusal { text: text.clone() });
-    } else if let Some(StructuredOutput { json }) = &variant.structured_output {
+    } else if let Some(StructuredOutput { json, .. }) = &variant.structured_output {
         let value = serde_json::from_str(json).map_err(|_| PlanError::InvalidStructuredOutput {
             fixture: fixture.id.clone(),
             case: case.id.clone(),

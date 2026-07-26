@@ -29,6 +29,8 @@ complete immutable plan:
 ```bash
 cargo run --locked --bin fixtures -- explain-semantic --request request.json
 cargo run --locked --bin fixtures -- snapshot-semantic --request request.json
+cargo run --locked --bin fixtures -- compatibility-report \
+  --baseline previous-semantic-fixtures.json --candidate data/semantic-fixtures.json
 ```
 
 All semantic commands accept `--input`; build and planning commands also accept `--models` for an
@@ -42,8 +44,11 @@ name an explicit fallback variant.
 
 An outcome variant may contain a public reasoning summary, a synthetic Chat-only reasoning trace,
 opaque encrypted reasoning, exact reasoning-token usage, and exactly one visible output: ordinary
-answer text, refusal text, or exact JSON bytes under `structured_output.json`. The compiler keeps
-those authored bytes alongside their parsed semantic value. Reasoning and structured output must be
+answer text, refusal text, or exact JSON bytes under `structured_output.json`. Every structured
+output also owns a self-contained `structured_output.schema`. The compiler preserves authored bytes,
+compiles the schema, and proves the parsed value satisfies it. A deliberately invalid value uses a
+`negative-*` variant id plus `negative: true`; negative variants cannot be defaults or fallbacks and
+are reached only through an explicit variant selector. Reasoning and structured output must be
 declared in the fixture's requirements. Structured cases also name their response format.
 
 For an explicitly selected Chat structured-output case, the authored semantic value is validated
@@ -56,7 +61,8 @@ the offline build. Authored JSON bytes remain unchanged after validation.
 The linter rejects unknown fields, duplicate keys and values, non-canonical or duplicate ids,
 unsupported schema versions, missing user turns, empty outcomes, invalid default/fallback
 references, undeclared interfaces or capabilities, ambiguous effort coverage, conflicting visible
-outputs, YAML anchors and aliases, and unquoted date-like scalars. Files and maps are sorted before
+outputs, unsupported JSON Schema keywords or remote references, schema/value mismatches, YAML
+anchors and aliases, and unquoted date-like scalars. Files and maps are sorted before
 later compilation so filesystem and map iteration order cannot affect artifacts.
 
 The built-in examples live under `fixtures/v2/`:
@@ -130,8 +136,11 @@ never exposed by Responses.
 6. Review response ids, output indexes, SSE ordering, usage, and terminal state together. A fixture
    change is not text-only when any of those observable values move.
 
-Schema-v2 corpus growth cannot alter exact case/variant selection. Digest fallback is revisioned and
-may change only with an explicit dataset revision and reviewed compatibility report. New output-item
+Schema-v2 corpus growth cannot alter exact case/variant selection. The compatibility report fails
+when an existing match/default/fallback assignment changes, an existing variant's output bytes move,
+a variant disappears, or any `legacy-*` payload changes; additive variants are reported but allowed.
+Digest fallback is revisioned and may change only with an explicit dataset revision and reviewed
+compatibility report. New output-item
 types append through the typed item/stage boundary; they must not renumber existing message or
 reasoning items in an established case.
 

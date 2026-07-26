@@ -42,6 +42,39 @@ fn semantic_artifact_reproduces_across_fresh_processes() {
 }
 
 #[test]
+fn compatibility_report_command_is_machine_readable_and_clean_for_same_artifact() {
+    let directory = tempfile::tempdir().unwrap();
+    let artifact = directory.path().join("semantic.json");
+    let build = fixtures_binary()
+        .args(["build-semantic", "--output"])
+        .arg(&artifact)
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let report = fixtures_binary()
+        .args(["compatibility-report", "--baseline"])
+        .arg(&artifact)
+        .arg("--candidate")
+        .arg(&artifact)
+        .output()
+        .unwrap();
+    assert!(
+        report.status.success(),
+        "{}",
+        String::from_utf8_lossy(&report.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&report.stdout).unwrap();
+    assert_eq!(value["compatible"], true);
+    assert_eq!(value["fallback_assignment_changes"], serde_json::json!([]));
+    assert_eq!(value["legacy_byte_changes"], serde_json::json!([]));
+}
+
+#[test]
 fn explain_command_is_stable_and_redacts_prompt_text() {
     let directory = tempfile::tempdir().unwrap();
     let request_path = directory.path().join("request.json");
