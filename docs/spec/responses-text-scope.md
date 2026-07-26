@@ -7,11 +7,10 @@ typed SSE events at `POST /v1/responses`; the executable corpus in
 [`responses-text-contract/`](responses-text-contract/) defines both boundaries.
 
 The locked `openai` 6.49.0 JavaScript client exercises response objects and text, reasoning-first,
-strict structured-output, and refusal streams in `e2e/responses-client.spec.ts`. The response
-includes the SDK-required `output_text` aggregation and standard response members in addition to
-the frozen minimal corpus. The same client verifies immutable stored-response retrieval, deletion,
-the common not-found error path, a linked two-turn `previous_response_id` continuation, and
-conversation resource and item creation, pagination, retrieval, Response association, and deletion.
+strict structured-output, and refusal streams in `e2e/responses-client.spec.ts`. The frozen corpus
+is generated from and checked byte-for-byte against the production response renderer and event
+schedule. The same client verifies immutable storage, predecessor continuation, typed errors,
+non-completed lifecycle states, conversation conflicts, and conversation resource/item operations.
 
 The contract is pinned to the OpenAI OpenAPI document at commit
 `5c044be3bf3a42854e99e34616564eeb2124a317` from 2026-07-23, full-document SHA-256
@@ -27,7 +26,7 @@ opt-in summaries but not raw reasoning tokens, and the
 [structured-output guide](https://developers.openai.com/api/docs/guides/structured-outputs) places
 the Responses format under `text.format`.
 
-## First-slice boundary
+## Implemented boundary
 
 The frozen surface contains one generation with these output forms:
 
@@ -92,11 +91,11 @@ a separately authored case backed by a pinned upstream contract.
 
 ## Structured-output policy
 
-The first validator uses `jsonschema` 0.49.x with default features disabled so HTTP resolution,
-file resolution, `reqwest`, and TLS do not enter the offline dependency graph. The supported strict
-subset is deliberately small: object, array, string, number, integer, boolean, and null types;
-properties; required members; `additionalProperties: false`; enum; nested arrays and objects; and
-`anyOf` for unions and nullable values. Remote references and unsupported keywords fail during
+The validator uses `jsonschema` 0.48.x with default features disabled so HTTP resolution, file
+resolution, `reqwest`, and TLS do not enter the offline dependency graph. Fixture-owned schemas
+accept the documented offline keyword allow-list: local `$defs`/`$ref`, types, properties, required,
+items, additional properties, enum/const, numeric/string/array bounds, pattern/format, and
+all/any/one/not composition. Remote references and every keyword outside that list fail during
 fixture linting.
 
 Strict fixture/schema mismatch is a build error. Runtime-invalid output exists only in a fixture
@@ -117,8 +116,7 @@ and the parsed value separately so byte reconstruction and semantic validation r
   the completed input/reasoning/output items are appended as one deterministic group. The item
   collection supports typed batches of 1–20 messages, retrieval, deletion, `asc`/`desc` ordering,
   `after` cursors, and bounded pagination. Identical batch retries reuse item identities without
-  duplication, deleted semantic items leave future planning context, and concurrent response groups
-  are ordered by identity rather than arrival time.
+  duplication, and deleted semantic items leave future planning context.
 - `previous_response_id` requires an available immutable stored predecessor. The predecessor's
   canonical turns are prepended for semantic matching and its complete public object participates
   in child plan identity, so branches require no counters or request ordering. Missing and deleted
@@ -157,10 +155,11 @@ bytes; a compatibility report must show no changed legacy fallback result before
 accepted.
 
 Within the new namespace, exact case/variant selection is stable across corpus growth. Digest
-fallback is versioned by dataset revision, and a fixture build reports every known prompt whose
-fallback target changes. Identifiers use named FNV-1a digest domains so adding one identifier does
-not perturb another. File enumeration, map iteration, request order, counters, wall time, and system
-randomness never participate.
+fallback is versioned by dataset revision. `fixtures compatibility-report` compares compiled
+artifacts and fails for changed match/default/fallback assignments, existing output bytes, removed
+variants, or legacy payload bytes while reporting additive variants. Identifiers use named FNV-1a
+digest domains so adding one identifier does not perturb another. File enumeration, map iteration,
+request order, counters, wall time, and system randomness never participate.
 
 Response output items expose typed identity, kind, and message-content accessors shared by rendering,
 conversation ownership, and routes. Stream schedules carry fault-stage metadata separately from
@@ -180,7 +179,8 @@ non-streamed response, and complete ordered event payloads for its streamed equi
 - `structured-output.json` freezes strict JSON request shape and awkward stream boundaries inside a
   JSON string.
 
-`tests/responses_contract.rs` proves contiguous sequence numbers, legal state ordering, one terminal
-event, delta reconstruction, equality between terminal and non-streamed responses, reasoning
-visibility, structured semantic equality, and provenance/SDK pinning. `tests/responses_api.rs`
-exercises the production event schedule through the in-process HTTP server.
+`tests/responses_contract.rs` independently runs the production compiler, renderer, router, and SSE
+schedule against every frozen object and event. It also proves contiguous sequence numbers, legal
+state ordering, one terminal event, delta reconstruction, terminal/non-streamed equality, reasoning
+visibility, structured semantic equality, and provenance/SDK pinning. `tests/responses_api.rs` adds
+lifecycle, state, replay, Unicode, zero-visible-output, concurrency, and staged-fault coverage.

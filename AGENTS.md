@@ -2,12 +2,13 @@
 
 ## Product contract
 
-- `no-llm-api` is a deterministic, offline OpenAI Chat Completions test double. Preserve
-  reproducible fixture selection, OpenAI-shaped JSON and SSE, controlled timing/fault simulation,
-  and an offline default build.
+- `no-llm-api` is a deterministic, offline OpenAI Chat Completions and experimental text-first
+  Responses test double. Preserve reproducible fixture selection, OpenAI-shaped JSON and SSE,
+  controlled timing/fault simulation, explicit state conflicts, and an offline default build.
 - Treat [`README.md`](README.md) as the canonical product and operations guide and
-  [`docs/spec/chat-completions-scope.md`](docs/spec/chat-completions-scope.md) as the implemented
-  wire contract. Describe shipped behavior in present tense. Historical changes belong in
+  [`docs/spec/chat-completions-scope.md`](docs/spec/chat-completions-scope.md) and
+  [`docs/spec/responses-text-scope.md`](docs/spec/responses-text-scope.md) as the implemented wire
+  contracts. Describe shipped behavior in present tense. Historical changes belong in
   `CHANGELOG.md`, not in planning documents.
 - Version `1.0.0` is the stable compatibility baseline. Follow `docs/versioning.md`: intended
   incompatible wire, configuration, fixture-selection, or scenario changes require a major version.
@@ -22,14 +23,19 @@
   re-exported by `src/lib.rs` so tests and auxiliary binaries use the same code. Never redeclare
   modules in `main.rs`; doing so compiles the crate and unit tests twice.
 - `src/sim/` owns deterministic selection, FNV-1a digests, request-derived identity, scenarios,
-  directives, token pieces, pacing, faults, cancellation, and terminal frames. Put streaming
-  behavior in `sim::stream`, not in HTTP route handlers.
+  directives, token pieces, pacing, faults, cancellation, and terminal frames. Chat streaming lives
+  in `sim::stream`; Responses event construction lives in `sim::responses_stream`. Do not build
+  either event vocabulary in HTTP route handlers.
 - `src/http/` owns transport concerns: routing, validation, auth, control plane, metrics, CORS,
   response headers, and the single error envelope in `error.rs`. Do not construct ad hoc error
   JSON in routes or services.
 - `service.rs` turns a validated request and selected fixture into completion plans.
   `store.rs` owns the process-local store and pagination. Keep selection and identity independent
   from storage and request order.
+- `responses.rs` owns the typed Responses vocabulary, canonical input/replay framing, rendering, and
+  token budgeting. `conversations.rs` owns conversation items and generation-checked commits. A
+  stale conversation write returns `409 conversation_conflict`; never silently append a plan built
+  from an older snapshot.
 - Prefer pure helpers and immutable plans. Shared mutable state is limited to explicit runtime
   facilities such as the completion store, control-plane scenario, bounded request log, metrics,
   and cancellation counter.
@@ -48,12 +54,18 @@
   median inter-frame gap with wide tolerances; never assert exact sleeps.
 - Multi-byte token boundaries must be decoded with the growing-buffer strategy. Do not decode token
   bytes independently or silently drop incomplete UTF-8.
+- Transport and persistence controls do not change semantic plan identity. Instructions, content-part
+  framing, model/effort/format/budget, state linkage, and opaque replay envelopes do. Never flatten
+  input parts by string concatenation or inspect encrypted reasoning content.
 
 ## Streaming and HTTP invariants
 
 - A normal stream opens with a role-only delta, emits non-empty content/reasoning/refusal/tool
   fragments, emits one terminal choice frame per choice, optionally emits one final usage frame,
   and ends with exactly one `[DONE]`.
+- A normal Responses stream uses contiguous `sequence_number` values, emits reasoning before visible
+  output for the current renderer, ends in exactly one typed terminal event, and has no `[DONE]`.
+  The terminal response object must equal the non-streamed object byte-for-byte.
 - Preserve stable chunk identity and ordering. Reasoning precedes visible content. Tool arguments
   concatenate into valid JSON and never use empty argument fragments. Absent delta members are
   omitted rather than serialized as `null`.
@@ -96,6 +108,12 @@
   `sim::scenario::BUILTINS` and documenting it in the README.
 - A fixture addition can change digest fallback selection for existing unknown prompts. Treat that
   as a compatibility decision, not harmless test data.
+- Author text/reasoning behavior in `fixtures/v2/*.yaml`. Structured variants own a self-contained
+  supported schema; only `negative-*` variants marked `negative: true` may violate it, and they can
+  never be defaults or fallbacks. Run `fixtures compatibility-report` when comparing artifacts.
+- The frozen Responses corpus under `docs/spec/responses-text-contract/` is production-generated.
+  Regenerate it with the ignored `regenerate_frozen_corpus_from_production` test and review the full
+  diff; do not invent ids, timestamps, usage, or events by hand.
 - Model catalogues expose only OpenAI model fields publicly; capabilities and latency stay in the
   control-plane view. Preserve per-request directive precedence over scenario timing, and scenario
   precedence over model latency.
@@ -146,6 +164,9 @@ cargo deny --log-level error check advisories bans licenses sources
 - `tests/async_openai.rs` uses the real locked `async-openai` 0.41.1 client and runs without an
   environment gate. It covers non-streamed and streamed content, usage, tools, refusals, finish
   reasons, and model discovery. Read the matching Cargo registry source instead of an upstream clone.
+- `e2e/responses-client.spec.ts` uses the locked official `openai` 6.49.0 JavaScript client for
+  Responses and Conversations. Run it for any Responses wire, lifecycle, replay, state, or error
+  change; Rust-only JSON assertions are not a substitute for this gate.
 
 For browser or packaging changes:
 

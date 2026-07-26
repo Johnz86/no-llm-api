@@ -16,9 +16,12 @@ configuration surface moved.
 
 - `POST /responses` serves deterministic text, refusal, structured-output, and public-reasoning
   objects plus typed SSE lifecycles. Stored Responses support retrieval, deletion, predecessor
-  continuation, deterministic branching, output budgets, and scenario-driven expiry.
+  continuation, deterministic branching, output budgets, scenario-driven expiry, typed prior-item
+  replay, and opaque encrypted reasoning replay. `store` and `parallel_tool_calls` follow the pinned
+  Responses default of `true`.
 - Conversation resources and typed item routes support deterministic creation, pagination,
-  retrieval, deletion, idempotent batches, and automatic Response input/reasoning/output ownership.
+  retrieval, deletion, idempotent batches, automatic Response input/reasoning/output ownership, and
+  generation-checked concurrent writes with `409 conversation_conflict` for stale commits.
 - `POST /chat/completions` returns the lean `CreateChatCompletionResponse` shape. The
   request echoes it used to carry (`temperature`, `top_p`, `stop`, `stream_options`,
   `request_id`, ...) now appear only on the stored object returned by `GET` and list.
@@ -62,7 +65,9 @@ configuration surface moved.
   spec-shaped error display in the embedded demo page, plus the locked official OpenAI client for
   Responses and Conversations compatibility.
 - Schema-v2 semantic fixtures, reproducible compiled artifacts, redacted plan explanations, and
-  exact effort/structured-output variants shared by Chat and Responses.
+  exact effort/structured-output variants shared by Chat and Responses. Structured variants own
+  compile-time validated schemas, explicitly named negative cases, and an artifact compatibility
+  report for fallback and byte drift.
 - A dependency-free `health --url` command and container healthcheck suitable for the distroless image.
 - A scheduled and manually dispatchable Open WebUI compatibility smoke that verifies model
   discovery and an exact streamed answer through Open WebUI's own API proxy.

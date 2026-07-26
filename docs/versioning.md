@@ -35,11 +35,14 @@ repository release.
 
 ## Release checklist
 
-1. `cargo test` and `cargo clippy --all-targets -- -D warnings` on both the default and
-   `live` feature sets.
-2. Move `CHANGELOG.md`'s `[Unreleased]` section under the new version, keeping the
+1. Run `cargo fmt --all --check`, default/all-feature/all-target/doc tests,
+   `cargo clippy --locked --all-targets --all-features -- -D warnings`, `cargo deny`, and the
+   no-default-feature dependency-tree check that excludes HTTP/TLS clients.
+2. Run `npm --prefix e2e test`, a release build, `cargo package --locked`, and the container build
+   plus readiness probe.
+3. Move `CHANGELOG.md`'s `[Unreleased]` section under the new version, keeping the
    **Wire behaviour** subsection first.
-3. Bump `version` in `Cargo.toml`; `x-no-llm-api-version`, `/health` and `/ready` read
+4. Bump `version` in `Cargo.toml`; `x-no-llm-api-version`, `/health` and `/ready` read
    it from `CARGO_PKG_VERSION`, so nothing else needs editing.
-4. Tag `vX.Y.Z`. The release workflow builds the five target binaries and publishes the
+5. Tag `vX.Y.Z`. The release workflow builds the five target binaries and publishes the
    container image to GHCR.

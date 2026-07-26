@@ -3,7 +3,8 @@
 `no-llm-api` is a deterministic, offline test double for OpenAI Chat Completions and the text-first
 Responses API. It gives applications realistic HTTP responses and paced Chat SSE streams without
 loading a model, making a network call, or consuming API credit. Outputs come from versioned
-fixtures and are stable across processes, machines, and concurrent requests.
+fixtures and are stable across processes, machines, and concurrent stateless requests. Conversation
+writes use explicit optimistic-conflict semantics instead of depending on arrival order.
 
 The repository includes the reusable Rust library, the server CLI, fixture authoring tools, an
 opt-in live recorder, a browser test page, container packaging, and an Open WebUI compatibility
@@ -27,7 +28,7 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 
 Add `"stream":true` and use `curl -N` to observe the paced SSE transcript.
 
-The experimental Responses surface uses the same semantic fixtures:
+The experimental Responses text surface uses the same semantic fixtures:
 
 ```bash
 curl http://127.0.0.1:8080/v1/responses \
@@ -37,8 +38,9 @@ curl http://127.0.0.1:8080/v1/responses \
 
 It supports text, public reasoning summaries, refusals, validated structured output, and typed SSE
 events with `"stream":true`. `max_output_tokens` uses reasoning-first accounting and returns an
-incomplete response when the budget is exhausted. A request with `"store":true` is retrievable and
-deletable at `/v1/responses/{response_id}`. A later request can name that immutable object through
+incomplete response when the budget is exhausted. Responses are stored by default; `"store":false`
+makes a request stateless. Stored objects are retrievable and deletable at
+`/v1/responses/{response_id}`. A later request can name that immutable object through
 `previous_response_id`; the stored turn sequence and parent object participate in deterministic
 selection and identity. Tools remain explicitly unsupported until their implementation slice.
 
@@ -47,11 +49,14 @@ selection and identity. Tools remain explicitly unsupported until their implemen
 Every request follows the same deterministic pipeline:
 
 1. The server validates the OpenAI-shaped request and selects a fixture from the requested model and
-   normalized conversation. Case and whitespace do not affect matching.
+   canonical conversation. Legacy Chat matching normalizes case and whitespace; schema-v2 semantic
+   matching preserves authored text and content-part boundaries.
 2. Multi-turn conversation-prefix matches take precedence over suffix matches and exact last-user
    matches. An unknown prompt falls back to a stable fixture selected with FNV-1a.
-3. The selected fixture supplies content, refusals, reasoning, tool or function calls, audio
-   metadata, and finish reasons. The configured tokenizer calculates usage and stream pieces.
+3. The selected fixture supplies the authored behavior for that API surface. Chat fixtures may
+   include content, refusals, reasoning, tool or function calls, audio metadata, and finish reasons;
+   Responses fixtures in this release contain text, refusals, structured output, and public or
+   encrypted reasoning. The configured tokenizer calculates usage and stream pieces.
    Request limits such as `n` and `max_completion_tokens` shape the returned choices without
    introducing nondeterminism.
 4. A non-streamed request receives one JSON completion. Streamed Chat requests receive deltas, one
@@ -123,13 +128,15 @@ curl -N http://127.0.0.1:8080/v1/chat/completions \
 Recognised directives: `fault` (`stall`, `drop`, `sse_error`, `http_error`, `slow_then_recover`)
 with `status`, `retry_after`, `after_ms`, `after_frames`, `rate`, and optional `stage`
 (`reasoning`, `output`, `tool`, or `terminal`); plus `ttft_ms`,
-`tokens_per_second`, `jitter_ms`, `chunk_tokens` and `burst_frames`.
+`tokens_per_second`, `jitter_ms`, `chunk_tokens`, `burst_frames`, and the test-only
+`commit_delay_ms` used to force overlapping conversation writes.
 
 Schema-v2 text, reasoning, and structured-output cases are selected explicitly with
 `X-Simulate-Case: fixture-id/case-id` and optional `X-Simulate-Variant`, or the equivalent `case`
 and `variant` body members. The body wins over headers. Successful responses expose the dataset
 revision, selected case and variant, match kind, and plan digest in `X-Simulate-*` headers. Requests
-without a semantic selector continue to use the legacy Chat matching ladder.
+without a semantic selector use natural semantic matching for Responses and the legacy matching
+ladder for Chat Completions.
 
 ## Control plane
 
@@ -141,7 +148,7 @@ without a semantic selector continue to use the legacy Chat matching ladder.
 | `GET /_mock/scenario` | The live profile. |
 | `PUT /_mock/scenario` | Replace it wholesale. |
 | `PATCH /_mock/scenario` | Merge a partial profile, member by member. |
-| `POST /_mock/reset` | Restore the boot profile and clear the request log and stored Responses. |
+| `POST /_mock/reset` | Restore the boot profile and clear request logs, Responses, and conversations. |
 | `GET /_mock/models` | Catalogue including simulation profiles. |
 | `GET /_mock/requests` | The last 100 requests, with credentials redacted. |
 | `GET /_mock/responses` | Sorted stored-response identities, linkage, status, and item/turn counts. |
@@ -325,8 +332,11 @@ The server mirrors the primary Chat Completions endpoints, exposed both at the r
 `GET /` is also unversioned and serves the bundled test page. The page is embedded in the binary, so
 it works from any working directory.
 
-Responses include usage data, tool and function call metadata, reasoning content, finish reasons,
-audio attachments, and refusal text when the fixture supplies them.
+Chat Completions include usage, tool/function metadata, synthetic reasoning content, finish reasons,
+audio metadata, and refusal text when the fixture supplies them. Responses in `1.0.0` include usage,
+text or refusal parts, public reasoning summaries, opaque encrypted reasoning replay, and structured
+text output. Responses tools, image/audio items, MCP, and skills are rejected or remain outside this
+release.
 
 Errors always use the spec envelope with all four members present, including explicit nulls, because
 clients read `code` and `param` straight off the body:
@@ -346,7 +356,8 @@ Conversation resources own an ordered process-local item log. Initial items and 
 content-derived identities, identical batch retries are idempotent, and Responses automatically
 append their input, reasoning, and output items. Item listing supports `asc`/`desc` ordering,
 `after` cursors, and bounded pagination; deleting an item also removes its semantic turn from future
-Response planning.
+Response planning. Overlapping response writes plan against one generation: a winner commits and
+stale writers receive `409 conversation_conflict`; sequential identical writes remain distinct turns.
 
 ## Testing
 
@@ -361,8 +372,9 @@ Response planning.
   object and streamed-event Responses with the locked official JavaScript client. It verifies
   incremental rendering, exact fixture text, browser-console hygiene, API errors, reasoning
   summaries, event ordering, structured output, stored-response retrieval/deletion, and predecessor
-  continuation. It also covers conversation resource lifecycle, Response association, and official
-  SDK item creation, cursor pagination, retrieval, and deletion. Install the browser once with
+  continuation, typed error handling, terminal lifecycle states, and conversation conflicts. It also
+  covers conversation resource lifecycle, Response association, and official SDK item creation,
+  cursor pagination, retrieval, and deletion. Install the browser once with
   `npx --prefix e2e playwright install chromium`.
 - `no-llm-api health --url http://127.0.0.1:8080/ready` is the dependency-free readiness probe
   used by the distroless image, where `curl` is unavailable.
@@ -376,6 +388,10 @@ Response planning.
 - [`docs/README.md`](docs/README.md) indexes the maintained technical documentation.
 - [`docs/spec/chat-completions-scope.md`](docs/spec/chat-completions-scope.md) defines the implemented
   Chat Completions contract.
+- [`docs/spec/responses-text-scope.md`](docs/spec/responses-text-scope.md) defines the implemented
+  experimental Responses text/reasoning, state, replay, and SSE contract.
+- [`docs/semantic-fixtures.md`](docs/semantic-fixtures.md) defines schema-v2 fixtures, owned schemas,
+  negative variants, artifact compilation, and compatibility reporting.
 - [`docs/spec/upstream-openapi.md`](docs/spec/upstream-openapi.md) explains the tracked OpenAPI extract
   and its refresh procedure.
 - [`docs/versioning.md`](docs/versioning.md) defines compatibility and the release process.
