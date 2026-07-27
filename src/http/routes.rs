@@ -943,54 +943,29 @@ fn validate_replay_items(request: &CreateResponseRequest) -> Result<(), ApiError
         return Ok(());
     };
     let mut ids = BTreeSet::new();
-    let mut pending_reasoning_suffix = None;
+    let mut pending_reasoning_suffix: Option<String> = None;
     for item in items {
+        if let Some(reasoning_suffix) = pending_reasoning_suffix.take() {
+            let ResponseInputItem::Message(message) = item else {
+                return Err(replay_pair_error());
+            };
+            if message.role != ResponseRole::Assistant || !message.is_replay() {
+                return Err(replay_pair_error());
+            }
+            let suffix = validate_assistant_replay(message, &mut ids)?;
+            if reasoning_suffix != suffix {
+                return Err(replay_error(
+                    "Adjacent reasoning and assistant replay items must come from the same response.",
+                    "replay_context_mismatch",
+                ));
+            }
+            continue;
+        }
         match item {
             ResponseInputItem::Message(message) => {
-                if message.role == ResponseRole::Assistant {
-                    let id = message.id.as_deref().ok_or_else(|| {
-                        replay_error(
-                            "Assistant replay messages require their original 'id'.",
-                            "invalid_replay_item",
-                        )
-                    })?;
-                    let suffix = id.strip_prefix("msg_").ok_or_else(|| {
-                        replay_error(
-                            "Assistant replay message ids must use the simulator 'msg_' identity.",
-                            "invalid_replay_item",
-                        )
-                    })?;
-                    if !matches!(message.status, Some(ResponseItemStatus::Completed)) {
-                        return Err(replay_error(
-                            "Assistant replay messages must have status 'completed'.",
-                            "invalid_replay_item",
-                        ));
-                    }
-                    if !matches!(
-                        message.content,
-                        crate::responses::ResponseInputContent::OutputParts(_)
-                    ) {
-                        return Err(replay_error(
-                            "Assistant replay messages require output_text or refusal content parts.",
-                            "invalid_replay_item",
-                        ));
-                    }
-                    insert_replay_id(&mut ids, id)?;
-                    if let Some(reasoning_suffix) = pending_reasoning_suffix.take()
-                        && reasoning_suffix != suffix
-                    {
-                        return Err(replay_error(
-                            "Adjacent reasoning and assistant replay items must come from the same response.",
-                            "replay_context_mismatch",
-                        ));
-                    }
-                } else if message.id.is_some()
-                    || message.status.is_some()
-                    || matches!(
-                        message.content,
-                        crate::responses::ResponseInputContent::OutputParts(_)
-                    )
-                {
+                if message.role == ResponseRole::Assistant && message.is_replay() {
+                    validate_assistant_replay(message, &mut ids)?;
+                } else if message.role != ResponseRole::Assistant && message.is_replay() {
                     return Err(replay_error(
                         "Only assistant output messages may carry replay identity and output content.",
                         "invalid_replay_item",
@@ -1024,11 +999,53 @@ fn validate_replay_items(request: &CreateResponseRequest) -> Result<(), ApiError
                         "invalid_encrypted_reasoning",
                     ));
                 }
-                pending_reasoning_suffix = Some(suffix);
+                pending_reasoning_suffix = Some(suffix.to_string());
             }
         }
     }
+    if pending_reasoning_suffix.is_some() {
+        return Err(replay_pair_error());
+    }
     Ok(())
+}
+
+fn validate_assistant_replay<'a>(
+    message: &'a crate::responses::ResponseInputMessage,
+    ids: &mut BTreeSet<String>,
+) -> Result<&'a str, ApiError> {
+    let id = message.id.as_deref().ok_or_else(|| {
+        replay_error(
+            "Assistant replay messages require their original 'id'.",
+            "invalid_replay_item",
+        )
+    })?;
+    let suffix = id.strip_prefix("msg_").ok_or_else(|| {
+        replay_error(
+            "Assistant replay message ids must use the simulator 'msg_' identity.",
+            "invalid_replay_item",
+        )
+    })?;
+    if !matches!(message.status, Some(ResponseItemStatus::Completed)) {
+        return Err(replay_error(
+            "Assistant replay messages must have status 'completed'.",
+            "invalid_replay_item",
+        ));
+    }
+    if !message.content.is_output() {
+        return Err(replay_error(
+            "Assistant replay messages require output_text or refusal content parts.",
+            "invalid_replay_item",
+        ));
+    }
+    insert_replay_id(ids, id)?;
+    Ok(suffix)
+}
+
+fn replay_pair_error() -> ApiError {
+    replay_error(
+        "A reasoning replay item must be followed immediately by its matching assistant output item.",
+        "replay_context_mismatch",
+    )
 }
 
 fn insert_replay_id(ids: &mut BTreeSet<String>, id: &str) -> Result<(), ApiError> {

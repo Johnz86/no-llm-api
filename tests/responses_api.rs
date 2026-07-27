@@ -377,6 +377,90 @@ async fn opaque_reasoning_and_output_items_replay_as_typed_input() {
 }
 
 #[tokio::test]
+async fn reasoning_replay_pairs_are_strictly_adjacent_and_complete() {
+    let fixture = fixture(100_000);
+    let (_, _, parent_body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-reasoner",
+            "input": "Which release should ship?",
+            "reasoning": {"effort": "high", "summary": "auto"},
+            "store": false
+        })),
+    )
+    .await;
+    let parent: Value = serde_json::from_str(&parent_body).unwrap();
+    let reasoning = parent["output"][0].clone();
+    let message = parent["output"][1].clone();
+    let user = json!({"type": "message", "role": "user", "content": "continue"});
+
+    let invalid_cases = [
+        (
+            "trailing reasoning",
+            json!([reasoning.clone()]),
+            "replay_context_mismatch",
+        ),
+        (
+            "intervening input",
+            json!([reasoning.clone(), user.clone(), message.clone()]),
+            "replay_context_mismatch",
+        ),
+        (
+            "consecutive reasoning",
+            json!([reasoning.clone(), reasoning.clone(), message.clone()]),
+            "replay_context_mismatch",
+        ),
+        (
+            "duplicate assistant",
+            json!([message.clone(), message.clone()]),
+            "duplicate_replay_item",
+        ),
+        (
+            "partial assistant",
+            {
+                let mut partial = message.clone();
+                partial["status"] = json!("in_progress");
+                json!([partial])
+            },
+            "invalid_replay_item",
+        ),
+        (
+            "raw reasoning",
+            {
+                let mut raw = reasoning;
+                raw["content"] = json!([{
+                    "type": "reasoning_text",
+                    "text": "private trace"
+                }]);
+                json!([raw, message])
+            },
+            "invalid_replay_item",
+        ),
+    ];
+
+    for (name, input, expected_code) in invalid_cases {
+        let (status, _, body) = send(
+            fixture.app.clone(),
+            "POST",
+            "/v1/responses",
+            Some(json!({
+                "model": "mock-reasoner",
+                "input": input,
+                "reasoning": {"effort": "high"},
+                "x_simulate": {"case": "reasoning-effort/release-decision"}
+            })),
+        )
+        .await;
+        assert_eq!(status, 400, "{name}: {body}");
+        let error = assert_error_envelope(&body);
+        assert_eq!(error["error"]["param"], "input", "{name}");
+        assert_eq!(error["error"]["code"], expected_code, "{name}");
+    }
+}
+
+#[tokio::test]
 async fn structured_response_preserves_bytes_after_schema_validation() {
     let fixture = fixture(1_000);
     let body = json!({
@@ -747,6 +831,71 @@ async fn state_modes_select_the_same_authored_continuation() {
             "Release validated; deployment is ready."
         );
     }
+}
+
+#[tokio::test]
+async fn ordinary_assistant_history_selects_the_authored_continuation() {
+    let fixture = fixture(100_000);
+    let (status, headers, body) = send(
+        fixture.app,
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": "Summarize the release in one paragraph."
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": "The release is ready after validation."
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": "Correction: use exactly five words."
+                }
+            ],
+            "store": false
+        })),
+    )
+    .await;
+
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(headers["x-simulate-match"], "exact");
+    assert_eq!(
+        serde_json::from_str::<Value>(&body).unwrap()["output_text"],
+        "Release validated; deployment is ready."
+    );
+}
+
+#[tokio::test]
+async fn assistant_prefill_input_parts_are_accepted_as_history() {
+    let fixture = fixture(100_000);
+    let (status, _, body) = send(
+        fixture.app,
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": [
+                {"type": "message", "role": "user", "content": "Introduce the simulator."},
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "input_text", "text": "no-llm-api"}]
+                }
+            ],
+            "store": false,
+            "x_simulate": {"case": "basic-text/concise"}
+        })),
+    )
+    .await;
+
+    assert_eq!(status, 200, "{body}");
 }
 
 #[tokio::test]

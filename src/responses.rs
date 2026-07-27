@@ -834,6 +834,16 @@ impl ResponseInputContent {
             }
         }
     }
+
+    pub(crate) fn is_output(&self) -> bool {
+        matches!(self, Self::OutputParts(_))
+    }
+}
+
+impl ResponseInputMessage {
+    pub(crate) fn is_replay(&self) -> bool {
+        self.id.is_some() || self.status.is_some() || self.content.is_output()
+    }
 }
 
 impl ResponseRole {
