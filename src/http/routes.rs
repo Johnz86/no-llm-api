@@ -28,9 +28,9 @@ use crate::model::{ChatCompletionList, ChatCompletionMessageList, ChatCompletion
 use crate::models::ModelCatalogue;
 use crate::request_types::ResponseFormat;
 use crate::responses::{
-    CreateResponseRequest, ResponseContentPart, ResponseInput, ResponseInputItem,
-    ResponseItemStatus, ResponseOutputItem, ResponseRole, ResponseTextFormat,
-    canonical_input_tokens, render_response_with_context,
+    CreateResponseRequest, ResolvedResponseContext, ResponseContentPart, ResponseInput,
+    ResponseInputItem, ResponseItemStatus, ResponseOutputItem, ResponseRole, ResponseTextFormat,
+    render_response_with_context,
 };
 use crate::service::ChatService;
 use crate::service::SemanticDiagnostics;
@@ -537,7 +537,8 @@ async fn create_response(
         .ok_or_else(|| ApiError::model_not_found(&request.model))?;
     let scenario = state.scenario.load_full();
     let mut canonical = request.canonical_request();
-    let prior = if let Some(previous_response_id) = request.previous_response_id.as_deref() {
+    let mut resolved_context = ResolvedResponseContext::from_request(&request);
+    if let Some(previous_response_id) = request.previous_response_id.as_deref() {
         if scenario.state.expire_previous_response {
             return Err(ApiError::not_found(previous_response_id)
                 .with_param("previous_response_id")
@@ -552,16 +553,13 @@ async fn create_response(
                     .with_param("previous_response_id")
                     .with_code("previous_response_not_found")
             })?;
-        canonical.turns.splice(0..0, stored.turns.clone());
+        resolved_context.prepend(&stored.turns, stored.carried_reasoning_tokens);
         merge_response_context(
             &mut canonical.context,
             "previous_response",
             serde_json::to_value(&stored.response).expect("stored Responses objects serialize"),
         );
-        Some(stored)
-    } else {
-        None
-    };
+    }
     let conversation = if let Some(conversation) = request.conversation.as_ref() {
         let id = conversation.id();
         let snapshot = state.conversations.snapshot(id).await.ok_or_else(|| {
@@ -569,7 +567,7 @@ async fn create_response(
                 .with_param("conversation")
                 .with_code("conversation_not_found")
         })?;
-        canonical.turns.splice(0..0, snapshot.turns.clone());
+        resolved_context.prepend(&snapshot.turns, snapshot.reasoning_tokens);
         merge_response_context(
             &mut canonical.context,
             "conversation",
@@ -582,6 +580,7 @@ async fn create_response(
     } else {
         None
     };
+    canonical.turns = resolved_context.turns.clone();
     if conversation.is_some() {
         if let Some(delay) = directive.commit_delay_ms {
             tokio::time::sleep(Duration::from_millis(delay.min(10_000))).await;
@@ -604,16 +603,7 @@ async fn create_response(
         &request,
         &plan,
         state.service.tokenizer().as_ref(),
-        prior
-            .as_ref()
-            .map(|stored| stored.response.usage.total_tokens)
-            .or_else(|| {
-                conversation.as_ref().map(|snapshot| {
-                    canonical_input_tokens(&snapshot.turns, state.service.tokenizer().as_ref())
-                        + snapshot.reasoning_tokens
-                })
-            })
-            .unwrap_or(0),
+        &resolved_context,
     );
     let base = model_timing(&state, &request.model).unwrap_or_else(|| scenario.timing.clone());
     let effective_scenario = Scenario {
@@ -649,11 +639,14 @@ async fn create_response(
         }
     }
     if request.store {
-        let mut turns = canonical.turns.clone();
+        let mut turns = resolved_context.turns.clone();
         turns.push(response_turn(&response));
+        let carried_reasoning_tokens = resolved_context
+            .carried_reasoning_tokens
+            .saturating_add(response.usage.output_tokens_details.reasoning_tokens);
         state
             .responses
-            .save(response.clone(), turns)
+            .save(response.clone(), turns, carried_reasoning_tokens)
             .await
             .map_err(|error| {
                 ApiError::server_error(error.to_string()).with_code("response_store_invariant")
@@ -955,6 +948,7 @@ fn validate_replay_items(request: &CreateResponseRequest) -> Result<(), ApiError
     };
     let mut ids = BTreeSet::new();
     let mut pending_reasoning_suffix: Option<String> = None;
+    let mut replay_reasoning_tokens = 0u32;
     for item in items {
         if let Some(reasoning_suffix) = pending_reasoning_suffix.take() {
             let ResponseInputItem::Message(message) = item else {
@@ -1025,6 +1019,14 @@ fn validate_replay_items(request: &CreateResponseRequest) -> Result<(), ApiError
                         "invalid_encrypted_reasoning",
                     ));
                 }
+                replay_reasoning_tokens = replay_reasoning_tokens
+                    .checked_add(envelope.reasoning_tokens)
+                    .ok_or_else(|| {
+                        replay_error(
+                            "Reasoning replay token accounting exceeds the supported range.",
+                            "invalid_encrypted_reasoning",
+                        )
+                    })?;
                 pending_reasoning_suffix = Some(suffix.to_string());
             }
         }

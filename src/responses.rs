@@ -381,21 +381,48 @@ pub struct ResponseOutputTokensDetails {
     pub reasoning_tokens: u32,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ResolvedResponseContext {
+    pub turns: Vec<CanonicalTurn>,
+    pub carried_reasoning_tokens: u32,
+}
+
+impl ResolvedResponseContext {
+    pub fn from_request(request: &CreateResponseRequest) -> Self {
+        Self {
+            turns: request.canonical_turns(),
+            carried_reasoning_tokens: request.replayed_reasoning_tokens(),
+        }
+    }
+
+    pub fn prepend(&mut self, turns: &[CanonicalTurn], carried_reasoning_tokens: u32) {
+        self.turns.splice(0..0, turns.iter().cloned());
+        self.carried_reasoning_tokens = self
+            .carried_reasoning_tokens
+            .saturating_add(carried_reasoning_tokens);
+    }
+}
+
 pub fn render_response(
     request: &CreateResponseRequest,
     plan: &SemanticResponsePlan,
     tokenizer: &CoreBPE,
 ) -> ResponseObject {
-    render_response_with_context(request, plan, tokenizer, 0)
+    render_response_with_context(
+        request,
+        plan,
+        tokenizer,
+        &ResolvedResponseContext::from_request(request),
+    )
 }
 
 pub fn render_response_with_context(
     request: &CreateResponseRequest,
     plan: &SemanticResponsePlan,
     tokenizer: &CoreBPE,
-    prior_input_tokens: u32,
+    context: &ResolvedResponseContext,
 ) -> ResponseObject {
-    let digest = response_resource_digest(request, plan, prior_input_tokens);
+    let digest = response_resource_digest(request, plan, context.carried_reasoning_tokens);
     let identity = Identity::derive(digest, IdentityMode::Derived, &SystemClock);
     let suffix = identity.id.trim_start_matches("chatcmpl-");
     let id = format!("resp_{suffix}");
@@ -472,8 +499,8 @@ pub fn render_response_with_context(
         });
     }
 
-    let input_tokens =
-        prior_input_tokens + canonical_input_tokens(&request.canonical_request().turns, tokenizer);
+    let input_tokens = canonical_input_tokens(&context.turns, tokenizer)
+        .saturating_add(context.carried_reasoning_tokens);
     let visible_tokens: u32 = output
         .iter()
         .filter_map(ResponseOutputItem::message_content)
@@ -547,7 +574,7 @@ pub fn render_response_with_context(
 fn response_resource_digest(
     request: &CreateResponseRequest,
     plan: &SemanticResponsePlan,
-    prior_input_tokens: u32,
+    carried_reasoning_tokens: u32,
 ) -> u64 {
     let representation = json!({
         "schema_revision": RESPONSES_SCHEMA_REVISION,
@@ -563,11 +590,11 @@ fn response_resource_digest(
         "store": request.store,
         "text": response_text_settings(request.text.as_ref()),
         "tools": request.tools,
-        "prior_input_tokens": prior_input_tokens,
+        "carried_reasoning_tokens": carried_reasoning_tokens,
         "metadata": request.metadata,
     });
     let canonical = crate::sim::canonical::canonical_json(&representation);
-    digest_fields(["responses-resource-v1", canonical.as_str()])
+    digest_fields(["responses-resource-v2", canonical.as_str()])
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -781,6 +808,15 @@ impl CreateResponseRequest {
             .contains(&ResponseInclude::ReasoningEncryptedContent)
     }
 
+    fn replayed_reasoning_tokens(&self) -> u32 {
+        let ResponseInput::Items(items) = &self.input else {
+            return 0;
+        };
+        items.iter().fold(0, |total, item| {
+            total.saturating_add(input_item_reasoning_tokens(item))
+        })
+    }
+
     pub fn canonical_request(&self) -> CanonicalRequest {
         CanonicalRequest {
             interface: Interface::Responses,
@@ -966,6 +1002,17 @@ pub(crate) fn canonical_input_item(item: &ResponseInputItem) -> Option<Canonical
         )),
         ResponseInputItem::Reasoning(_) => None,
     }
+}
+
+pub(crate) fn input_item_reasoning_tokens(item: &ResponseInputItem) -> u32 {
+    let ResponseInputItem::Reasoning(reasoning) = item else {
+        return 0;
+    };
+    reasoning
+        .encrypted_content
+        .as_deref()
+        .and_then(decode_reasoning_envelope)
+        .map_or(0, |metadata| metadata.reasoning_tokens)
 }
 
 pub(crate) fn canonical_input_tokens(turns: &[CanonicalTurn], tokenizer: &CoreBPE) -> u32 {

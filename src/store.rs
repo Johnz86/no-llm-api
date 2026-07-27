@@ -30,6 +30,7 @@ pub struct ResponseStore {
 pub struct StoredResponse {
     pub response: ResponseObject,
     pub turns: Vec<CanonicalTurn>,
+    pub carried_reasoning_tokens: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -58,10 +59,15 @@ impl ResponseStore {
         &self,
         response: ResponseObject,
         turns: Vec<CanonicalTurn>,
+        carried_reasoning_tokens: u32,
     ) -> Result<(), ResponseStoreConflict> {
         let mut guard = self.inner.write().await;
         let id = response.id.clone();
-        let candidate = StoredResponse { response, turns };
+        let candidate = StoredResponse {
+            response,
+            turns,
+            carried_reasoning_tokens,
+        };
         match guard.entry(id.clone()) {
             indexmap::map::Entry::Vacant(entry) => {
                 entry.insert(candidate);
@@ -378,9 +384,9 @@ mod tests {
     async fn responses_are_immutable_and_delete_is_explicit() {
         let store = ResponseStore::new();
         let mut first = sample_response_object("resp_test");
-        store.save(first.clone(), Vec::new()).await.unwrap();
+        store.save(first.clone(), Vec::new(), 0).await.unwrap();
         first.model = "changed-model".to_string();
-        let error = store.save(first, Vec::new()).await.unwrap_err();
+        let error = store.save(first, Vec::new(), 0).await.unwrap_err();
 
         assert_eq!(error.id, "resp_test");
         assert_eq!(store.get("resp_test").await.unwrap().model, "test-model");

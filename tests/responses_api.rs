@@ -929,6 +929,213 @@ async fn state_modes_select_the_same_authored_continuation() {
 }
 
 #[tokio::test]
+async fn reasoning_usage_is_equal_across_all_continuation_modes() {
+    let fixture = fixture(100_000);
+    let original = "Which release should ship?";
+    let next = "Which release should ship?";
+    let (_, _, parent_body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-reasoner",
+            "input": original,
+            "reasoning": {"effort": "high", "summary": "auto"},
+            "include": ["reasoning.encrypted_content"],
+            "store": true
+        })),
+    )
+    .await;
+    let parent: Value = serde_json::from_str(&parent_body).unwrap();
+
+    let (_, _, predecessor_body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-reasoner",
+            "input": next,
+            "previous_response_id": parent["id"],
+            "reasoning": {"effort": "high", "summary": "auto"},
+            "store": false,
+            "x_simulate": {"case": "reasoning-effort/release-decision"}
+        })),
+    )
+    .await;
+    let predecessor: Value = serde_json::from_str(&predecessor_body).unwrap();
+
+    let history = json!([
+        {"type": "message", "role": "user", "content": original},
+        parent["output"][0].clone(),
+        parent["output"][1].clone(),
+        {"type": "message", "role": "user", "content": next}
+    ]);
+    let (_, _, stateless_body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-reasoner",
+            "input": history,
+            "reasoning": {"effort": "high", "summary": "auto"},
+            "store": false,
+            "x_simulate": {"case": "reasoning-effort/release-decision"}
+        })),
+    )
+    .await;
+    let stateless: Value = serde_json::from_str(&stateless_body).unwrap();
+
+    let (_, _, conversation_body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/conversations",
+        Some(json!({
+            "items": [
+                {"type": "message", "role": "user", "content": original},
+                parent["output"][0].clone(),
+                parent["output"][1].clone()
+            ]
+        })),
+    )
+    .await;
+    let conversation: Value = serde_json::from_str(&conversation_body).unwrap();
+    let (_, _, conversation_response_body) = send(
+        fixture.app,
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-reasoner",
+            "input": next,
+            "conversation": conversation["id"],
+            "reasoning": {"effort": "high", "summary": "auto"},
+            "store": false,
+            "x_simulate": {"case": "reasoning-effort/release-decision"}
+        })),
+    )
+    .await;
+    let conversation_response: Value = serde_json::from_str(&conversation_response_body).unwrap();
+
+    let expected_input_tokens = predecessor["usage"]["input_tokens"].clone();
+    assert!(expected_input_tokens.as_u64().unwrap() > 28);
+    for response in [&predecessor, &stateless, &conversation_response] {
+        assert_eq!(response["output_text"], "Ship release B.");
+        assert_eq!(response["usage"]["input_tokens"], expected_input_tokens);
+    }
+}
+
+#[tokio::test]
+async fn multi_generation_predecessors_do_not_double_count_prior_input() {
+    let fixture = fixture(100_000);
+    let input = "Which release should ship?";
+    let create = |previous_response_id: Option<Value>| {
+        let mut request = json!({
+            "model": "mock-reasoner",
+            "input": input,
+            "reasoning": {"effort": "high", "summary": "auto"},
+            "include": ["reasoning.encrypted_content"],
+            "store": true,
+            "x_simulate": {"case": "reasoning-effort/release-decision"}
+        });
+        if let Some(previous_response_id) = previous_response_id {
+            request["previous_response_id"] = previous_response_id;
+        }
+        request
+    };
+    let (_, _, parent_body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(create(None)),
+    )
+    .await;
+    let parent: Value = serde_json::from_str(&parent_body).unwrap();
+    let (_, _, child_body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(create(Some(parent["id"].clone()))),
+    )
+    .await;
+    let child: Value = serde_json::from_str(&child_body).unwrap();
+    let (_, _, grandchild_body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(create(Some(child["id"].clone()))),
+    )
+    .await;
+    let grandchild: Value = serde_json::from_str(&grandchild_body).unwrap();
+
+    let (_, _, replay_body) = send(
+        fixture.app,
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-reasoner",
+            "input": [
+                {"type": "message", "role": "user", "content": input},
+                parent["output"][0].clone(),
+                parent["output"][1].clone(),
+                {"type": "message", "role": "user", "content": input},
+                child["output"][0].clone(),
+                child["output"][1].clone(),
+                {"type": "message", "role": "user", "content": input}
+            ],
+            "reasoning": {"effort": "high", "summary": "auto"},
+            "store": false,
+            "x_simulate": {"case": "reasoning-effort/release-decision"}
+        })),
+    )
+    .await;
+    let replay: Value = serde_json::from_str(&replay_body).unwrap();
+
+    assert_eq!(
+        grandchild["usage"]["input_tokens"],
+        replay["usage"]["input_tokens"]
+    );
+    assert_eq!(grandchild["output_text"], replay["output_text"]);
+}
+
+#[tokio::test]
+async fn reasoning_only_predecessors_carry_nonzero_reasoning_usage() {
+    let fixture = fixture(100_000);
+    let (_, _, parent_body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-reasoner",
+            "input": "Return reasoning without visible output.",
+            "reasoning": {"effort": "high", "summary": "auto"},
+            "store": true
+        })),
+    )
+    .await;
+    let parent: Value = serde_json::from_str(&parent_body).unwrap();
+    assert_eq!(
+        parent["usage"]["output_tokens_details"]["reasoning_tokens"],
+        12
+    );
+
+    let (_, _, child_body) = send(
+        fixture.app,
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-reasoner",
+            "input": "Which release should ship?",
+            "previous_response_id": parent["id"],
+            "reasoning": {"effort": "high", "summary": "auto"},
+            "store": false,
+            "x_simulate": {"case": "reasoning-effort/release-decision"}
+        })),
+    )
+    .await;
+    let child: Value = serde_json::from_str(&child_body).unwrap();
+    assert!(child["usage"]["input_tokens"].as_u64().unwrap() > 12);
+}
+
+#[tokio::test]
 async fn ordinary_assistant_history_selects_the_authored_continuation() {
     let fixture = fixture(100_000);
     let (status, headers, body) = send(

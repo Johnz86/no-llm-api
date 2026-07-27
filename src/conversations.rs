@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 
 use crate::responses::{
     CreateResponseRequest, ResponseInput, ResponseInputItem, ResponseObject,
-    ResponseOutputItemKind, canonical_input_item,
+    ResponseOutputItemKind, canonical_input_item, input_item_reasoning_tokens,
 };
 use crate::sim::canonical::{CanonicalTurn, canonical_json};
 use crate::sim::digest::digest_fields;
@@ -114,7 +114,7 @@ impl ConversationStore {
                         ordinal: index,
                         value: input_item_value(item, &id),
                         turn: canonical_input_item(item),
-                        reasoning_tokens: 0,
+                        reasoning_tokens: input_item_reasoning_tokens(item),
                     },
                 )
             })
@@ -180,7 +180,7 @@ impl ConversationStore {
                     ordinal: index,
                     value: input_item_value(&item, &item_id),
                     turn,
-                    reasoning_tokens: 0,
+                    reasoning_tokens: input_item_reasoning_tokens(&item),
                 });
         }
         let offset = request.canonical_turns().len();
@@ -235,7 +235,7 @@ impl ConversationStore {
                     ordinal: index,
                     value: input_item_value(item, &item_id),
                     turn: canonical_input_item(item),
-                    reasoning_tokens: 0,
+                    reasoning_tokens: input_item_reasoning_tokens(item),
                 });
             ids.push(item_id);
         }
