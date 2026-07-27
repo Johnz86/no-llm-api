@@ -31,6 +31,7 @@ cases:
       high:
         reasoning_summary: Compared readiness, blockers, rollback coverage, ownership, and recovery time.
         reasoning_trace: Compared readiness, blockers, rollback coverage, ownership, and recovery time.
+        reasoning_encrypted: fixture-authored-opaque-reasoning
         reasoning_tokens: 28
         answer: Ship release B.
     terminal: completed

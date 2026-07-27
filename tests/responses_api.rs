@@ -145,8 +145,13 @@ async fn representation_controls_change_resource_identity_not_semantic_selection
             value
         },
         {
-            let mut value = base;
+            let mut value = base.clone();
             value["reasoning"]["summary"] = json!("auto");
+            value
+        },
+        {
+            let mut value = base;
+            value["include"] = json!(["reasoning.encrypted_content"]);
             value
         },
     ];
@@ -168,7 +173,7 @@ async fn representation_controls_change_resource_identity_not_semantic_selection
     }
 
     assert_eq!(plan_digests.len(), 1);
-    assert_eq!(resource_ids.len(), 5);
+    assert_eq!(resource_ids.len(), 6);
 }
 
 #[tokio::test]
@@ -289,7 +294,92 @@ async fn reasoning_summary_is_public_but_chat_trace_is_absent() {
         response["usage"]["output_tokens_details"]["reasoning_tokens"],
         28
     );
+    assert!(response["output"][0].get("encrypted_content").is_none());
     assert!(!text.contains("reasoning_content"));
+}
+
+#[tokio::test]
+async fn encrypted_reasoning_is_opt_in_and_replays_across_fresh_instances() {
+    let first = fixture(100_000);
+    let request = json!({
+        "model": "mock-reasoner",
+        "input": "Which release should ship?",
+        "reasoning": {"effort": "high", "summary": "auto"},
+        "store": false
+    });
+    let (status, _, default_body) = send(
+        first.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, 200, "{default_body}");
+    let default_response: Value = serde_json::from_str(&default_body).unwrap();
+    assert!(
+        default_response["output"][0]
+            .get("encrypted_content")
+            .is_none()
+    );
+
+    let mut included_request = request.clone();
+    included_request["include"] = json!(["reasoning.encrypted_content"]);
+    let (status, _, included_body) = send(
+        first.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(included_request.clone()),
+    )
+    .await;
+    assert_eq!(status, 200, "{included_body}");
+    let included: Value = serde_json::from_str(&included_body).unwrap();
+    let encrypted = included["output"][0]["encrypted_content"].as_str().unwrap();
+    assert!(encrypted.starts_with("enc_v1_"));
+    assert!(!included_body.contains("fixture-authored-opaque-reasoning"));
+    assert_ne!(default_response["id"], included["id"]);
+
+    let mut streamed_request = included_request;
+    streamed_request["stream"] = json!(true);
+    let events = collect_sse_at(first.app.clone(), "/v1/responses", streamed_request)
+        .await
+        .chunks();
+    assert_eq!(events.last().unwrap()["response"], included);
+    let added = events
+        .iter()
+        .find(|event| event["type"] == "response.output_item.added")
+        .unwrap();
+    assert_eq!(added["item"]["encrypted_content"], encrypted);
+
+    let mut default_stream = request;
+    default_stream["stream"] = json!(true);
+    let default_events = collect_sse_at(first.app, "/v1/responses", default_stream)
+        .await
+        .chunks();
+    assert!(
+        !serde_json::to_string(&default_events)
+            .unwrap()
+            .contains("encrypted_content")
+    );
+
+    let second = fixture(100_000);
+    let (status, _, replay_body) = send(
+        second.app,
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-reasoner",
+            "input": [
+                included["output"][0].clone(),
+                included["output"][1].clone(),
+                {"type": "message", "role": "user", "content": "Which release should ship?"}
+            ],
+            "reasoning": {"effort": "high", "summary": "auto"},
+            "store": false,
+            "x_simulate": {"case": "reasoning-effort/release-decision"}
+        })),
+    )
+    .await;
+    assert_eq!(status, 200, "{replay_body}");
 }
 
 #[tokio::test]
@@ -299,6 +389,7 @@ async fn opaque_reasoning_and_output_items_replay_as_typed_input() {
         "model": "mock-reasoner",
         "input": "Which release should ship?",
         "reasoning": {"effort": "high", "summary": "auto"},
+        "include": ["reasoning.encrypted_content"],
         "store": false
     });
     let (status, _, parent_body) =
@@ -387,6 +478,7 @@ async fn reasoning_replay_pairs_are_strictly_adjacent_and_complete() {
             "model": "mock-reasoner",
             "input": "Which release should ship?",
             "reasoning": {"effort": "high", "summary": "auto"},
+            "include": ["reasoning.encrypted_content"],
             "store": false
         })),
     )
@@ -554,7 +646,10 @@ async fn explicitly_selected_negative_structured_variant_fails_at_runtime() {
 
 #[tokio::test]
 async fn unsupported_future_controls_fail_explicitly() {
-    for (field, value) in [("tools", json!([{"type": "function"}]))] {
+    for (field, value) in [
+        ("tools", json!([{"type": "function"}])),
+        ("include", json!(["file_search_call.results"])),
+    ] {
         let fixture = fixture(1_000);
         let mut body = json!({
             "model": "mock-reasoner",

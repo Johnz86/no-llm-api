@@ -21,11 +21,25 @@ test('official client receives text and public reasoning summary', async () => {
   expect(reasoning?.summary[0]?.text).toBe(
     'Compared readiness, blockers, rollback coverage, ownership, and recovery time.',
   );
+  expect(reasoning).not.toHaveProperty('encrypted_content');
   expect(message?.content[0]?.type).toBe('output_text');
   if (message?.content[0]?.type === 'output_text') {
     expect(message.content[0].text).toBe('Ship release B.');
   }
   expect(response.usage?.output_tokens_details.reasoning_tokens).toBe(28);
+});
+
+test('official client requests opaque reasoning explicitly', async () => {
+  const response = await client.responses.create({
+    model: 'mock-reasoner',
+    input: 'Which release should ship?',
+    reasoning: { effort: 'high', summary: 'auto' },
+    include: ['reasoning.encrypted_content'],
+    store: false,
+  });
+
+  const reasoning = response.output.find(item => item.type === 'reasoning');
+  expect(reasoning?.encrypted_content).toMatch(/^enc_v1_[0-9a-f_]+$/);
 });
 
 test('official client receives validated structured output bytes', async () => {

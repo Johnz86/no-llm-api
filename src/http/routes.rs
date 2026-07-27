@@ -896,6 +896,17 @@ fn validate_response_request(request: &CreateResponseRequest) -> Result<(), ApiE
         .with_param("input"));
     }
     validate_replay_items(request)?;
+    if request
+        .include
+        .iter()
+        .any(|include| *include != crate::responses::ResponseInclude::ReasoningEncryptedContent)
+    {
+        return Err(ApiError::invalid_request(
+            "Only 'reasoning.encrypted_content' is supported by the text Responses surface.",
+        )
+        .with_param("include")
+        .with_code("unsupported_parameter"));
+    }
     if request.metadata.len() > 16 {
         return Err(ApiError::invalid_request(
             "Invalid value for 'metadata': at most 16 entries are allowed.",
@@ -992,8 +1003,23 @@ fn validate_replay_items(request: &CreateResponseRequest) -> Result<(), ApiError
                         "invalid_replay_item",
                     ));
                 }
-                let expected = format!("enc_{suffix}");
-                if reasoning.encrypted_content.as_deref() != Some(expected.as_str()) {
+                let envelope = reasoning
+                    .encrypted_content
+                    .as_deref()
+                    .and_then(crate::responses::decode_reasoning_envelope)
+                    .ok_or_else(|| {
+                        replay_error(
+                            "Reasoning replay requires the intact opaque encrypted_content emitted with that item.",
+                            "invalid_encrypted_reasoning",
+                        )
+                    })?;
+                let expected_resource = u64::from_str_radix(suffix, 16).map_err(|_| {
+                    replay_error(
+                        "Reasoning replay ids must contain a valid simulator resource digest.",
+                        "invalid_replay_item",
+                    )
+                })?;
+                if envelope.resource_digest != expected_resource {
                     return Err(replay_error(
                         "Reasoning replay requires the intact opaque encrypted_content emitted with that item.",
                         "invalid_encrypted_reasoning",

@@ -25,6 +25,8 @@ pub struct CreateResponseRequest {
     pub instructions: Option<String>,
     #[serde(default)]
     pub reasoning: Option<ResponseReasoningConfig>,
+    #[serde(default, deserialize_with = "include_or_default")]
+    pub include: Vec<ResponseInclude>,
     #[serde(default)]
     pub text: Option<ResponseTextConfig>,
     #[serde(default)]
@@ -167,6 +169,26 @@ pub enum ReasoningSummary {
     Auto,
     Concise,
     Detailed,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ResponseInclude {
+    #[serde(rename = "file_search_call.results")]
+    FileSearchCallResults,
+    #[serde(rename = "web_search_call.results")]
+    WebSearchCallResults,
+    #[serde(rename = "web_search_call.action.sources")]
+    WebSearchCallActionSources,
+    #[serde(rename = "message.input_image.image_url")]
+    MessageInputImageImageUrl,
+    #[serde(rename = "computer_call_output.output.image_url")]
+    ComputerCallOutputImageUrl,
+    #[serde(rename = "code_interpreter_call.outputs")]
+    CodeInterpreterCallOutputs,
+    #[serde(rename = "reasoning.encrypted_content")]
+    ReasoningEncryptedContent,
+    #[serde(rename = "message.output_text.logprobs")]
+    MessageOutputTextLogprobs,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -391,18 +413,16 @@ pub fn render_response_with_context(
     let mut output = Vec::new();
     let mut message_parts = Vec::new();
     let mut summary_text = None;
-    let mut encrypted_content = None;
+    let mut authored_encrypted = None;
+    let mut has_reasoning = false;
     for node in &budget.output {
         match node {
             SemanticOutput::Reasoning {
                 summary, encrypted, ..
             } => {
+                has_reasoning = true;
                 summary_text = summary.clone();
-                encrypted_content = Some(
-                    encrypted
-                        .clone()
-                        .unwrap_or_else(|| format!("enc_{digest:016x}")),
-                );
+                authored_encrypted = encrypted.as_deref();
             }
             SemanticOutput::Text { text } | SemanticOutput::Structured { json: text, .. } => {
                 message_parts.push(ResponseContentPart::OutputText {
@@ -423,7 +443,7 @@ pub fn render_response_with_context(
         .as_ref()
         .and_then(|reasoning| reasoning.summary)
         .is_some();
-    if (summary_requested && summary_text.is_some()) || encrypted_content.is_some() {
+    if has_reasoning {
         let summary = summary_text
             .clone()
             .filter(|_| summary_requested)
@@ -438,7 +458,9 @@ pub fn render_response_with_context(
             id: format!("rs_{digest:016x}"),
             status: item_status,
             summary,
-            encrypted_content,
+            encrypted_content: request.includes_encrypted_reasoning().then(|| {
+                encode_reasoning_envelope(digest, budget.reasoning_tokens, authored_encrypted)
+            }),
         });
     }
     if !message_parts.is_empty() {
@@ -537,6 +559,7 @@ fn response_resource_digest(
         "previous_response_id": request.previous_response_id,
         "conversation_id": request.conversation.as_ref().map(ResponseConversationParam::id),
         "reasoning": request.reasoning,
+        "include_encrypted_reasoning": request.includes_encrypted_reasoning(),
         "store": request.store,
         "text": response_text_settings(request.text.as_ref()),
         "tools": request.tools,
@@ -545,6 +568,59 @@ fn response_resource_digest(
     });
     let canonical = crate::sim::canonical::canonical_json(&representation);
     digest_fields(["responses-resource-v1", canonical.as_str()])
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OpaqueReasoningMetadata {
+    pub resource_digest: u64,
+    pub reasoning_tokens: u32,
+}
+
+fn encode_reasoning_envelope(
+    resource_digest: u64,
+    reasoning_tokens: u32,
+    authored: Option<&str>,
+) -> String {
+    let material_digest = digest_fields([
+        "responses-reasoning-material-v1",
+        authored.unwrap_or_default(),
+    ]);
+    format_reasoning_envelope(resource_digest, reasoning_tokens, material_digest)
+}
+
+fn format_reasoning_envelope(
+    resource_digest: u64,
+    reasoning_tokens: u32,
+    material_digest: u64,
+) -> String {
+    let resource = format!("{resource_digest:016x}");
+    let tokens = format!("{reasoning_tokens:08x}");
+    let material = format!("{material_digest:016x}");
+    let seal = digest_fields([
+        "responses-reasoning-envelope-v1",
+        resource.as_str(),
+        tokens.as_str(),
+        material.as_str(),
+    ]);
+    format!("enc_v1_{resource}_{tokens}_{material}_{seal:016x}")
+}
+
+pub(crate) fn decode_reasoning_envelope(value: &str) -> Option<OpaqueReasoningMetadata> {
+    let parts: Vec<_> = value.split('_').collect();
+    let ["enc", "v1", resource, tokens, material, seal] = parts.as_slice() else {
+        return None;
+    };
+    let resource_digest = u64::from_str_radix(resource, 16).ok()?;
+    let reasoning_tokens = u32::from_str_radix(tokens, 16).ok()?;
+    let material_digest = u64::from_str_radix(material, 16).ok()?;
+    let parsed_seal = u64::from_str_radix(seal, 16).ok()?;
+    let canonical = format_reasoning_envelope(resource_digest, reasoning_tokens, material_digest);
+    (canonical == value && canonical.ends_with(&format!("{parsed_seal:016x}"))).then_some(
+        OpaqueReasoningMetadata {
+            resource_digest,
+            reasoning_tokens,
+        },
+    )
 }
 
 struct ResponseBudget {
@@ -700,6 +776,11 @@ fn response_text_settings(config: Option<&ResponseTextConfig>) -> ResponseTextSe
 }
 
 impl CreateResponseRequest {
+    pub(crate) fn includes_encrypted_reasoning(&self) -> bool {
+        self.include
+            .contains(&ResponseInclude::ReasoningEncryptedContent)
+    }
+
     pub fn canonical_request(&self) -> CanonicalRequest {
         CanonicalRequest {
             interface: Interface::Responses,
@@ -778,6 +859,13 @@ where
     D: serde::Deserializer<'de>,
 {
     Ok(Option::<BTreeMap<String, String>>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+fn include_or_default<'de, D>(deserializer: D) -> Result<Vec<ResponseInclude>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<Vec<ResponseInclude>>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 fn canonical_content_turn(role: &str, content: &ResponseInputContent) -> CanonicalTurn {
@@ -966,17 +1054,35 @@ mod tests {
                 "store": null,
                 "parallel_tool_calls": null,
                 "metadata": null,
+                "include": null,
                 "text": {}
             }),
         ] {
             let request: CreateResponseRequest = serde_json::from_value(body).unwrap();
             assert!(request.store);
             assert!(request.parallel_tool_calls);
+            assert!(request.include.is_empty());
             assert_eq!(
                 request.text.unwrap_or_default().format,
                 ResponseTextFormat::Text
             );
         }
+    }
+
+    #[test]
+    fn pinned_include_values_are_typed_before_scope_validation() {
+        let request: CreateResponseRequest = serde_json::from_value(serde_json::json!({
+            "model": "mock-reasoner",
+            "input": "hello",
+            "include": [
+                "reasoning.encrypted_content",
+                "file_search_call.results"
+            ]
+        }))
+        .unwrap();
+
+        assert!(request.includes_encrypted_reasoning());
+        assert_eq!(request.include.len(), 2);
     }
 
     #[test]

@@ -256,16 +256,19 @@ fn schedule_reasoning(
     encrypted_content: Option<&str>,
     tokenizer: &CoreBPE,
 ) {
+    let mut item = json!({
+        "id": item_id,
+        "type": "reasoning",
+        "status": "in_progress",
+        "summary": [],
+    });
+    if let Some(encrypted_content) = encrypted_content {
+        item["encrypted_content"] = json!(encrypted_content);
+    }
     events.push(json!({
         "type": "response.output_item.added",
         "output_index": output_index,
-        "item": {
-            "id": item_id,
-            "type": "reasoning",
-            "status": "in_progress",
-            "summary": [],
-            "encrypted_content": encrypted_content,
-        },
+        "item": item,
     }));
     for (summary_index, part) in summary.iter().enumerate() {
         events.push(json!({

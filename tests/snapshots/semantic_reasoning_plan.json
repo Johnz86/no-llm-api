@@ -10,7 +10,7 @@
       "type": "reasoning",
       "summary": "Compared readiness, blockers, rollback coverage, ownership, and recovery time.",
       "trace": "Compared readiness, blockers, rollback coverage, ownership, and recovery time.",
-      "encrypted": null
+      "encrypted": "fixture-authored-opaque-reasoning"
     },
     {
       "type": "text",
@@ -21,7 +21,7 @@
   "usage": {
     "reasoning_tokens": 28
   },
-  "plan_digest": "f906fdd12e3da23b",
+  "plan_digest": "bc155bf8b8a3e58d",
   "explanation": {
     "match_kind": "exact",
     "fixture_id": "reasoning-effort",
@@ -37,7 +37,7 @@
       }
     ],
     "effective_controls": {
-      "dataset_revision": "639cb1a9676a8f55",
+      "dataset_revision": "bd2efb342202ff58",
       "scenario_revision": "default-v1",
       "model_profile_revision": "builtin-v1",
       "simulation_seed": null
