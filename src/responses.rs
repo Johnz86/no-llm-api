@@ -8,6 +8,7 @@ use tiktoken_rs::CoreBPE;
 
 use crate::request_types::ReasoningEffort;
 use crate::sim::canonical::{CanonicalContent, CanonicalRequest, CanonicalTurn};
+use crate::sim::digest::digest_fields;
 use crate::sim::identity::{Identity, IdentityMode, SystemClock};
 use crate::sim::plan::{SemanticOutput, SemanticResponsePlan};
 use crate::sim::script::Interface;
@@ -372,8 +373,7 @@ pub fn render_response_with_context(
     tokenizer: &CoreBPE,
     prior_input_tokens: u32,
 ) -> ResponseObject {
-    let digest = u64::from_str_radix(&plan.plan_digest, 16)
-        .expect("semantic plan digest is a hexadecimal u64");
+    let digest = response_resource_digest(request, plan, prior_input_tokens);
     let identity = Identity::derive(digest, IdentityMode::Derived, &SystemClock);
     let suffix = identity.id.trim_start_matches("chatcmpl-");
     let id = format!("resp_{suffix}");
@@ -520,6 +520,31 @@ pub fn render_response_with_context(
         },
         metadata: request.metadata.clone(),
     }
+}
+
+fn response_resource_digest(
+    request: &CreateResponseRequest,
+    plan: &SemanticResponsePlan,
+    prior_input_tokens: u32,
+) -> u64 {
+    let representation = json!({
+        "schema_revision": RESPONSES_SCHEMA_REVISION,
+        "plan_digest": plan.plan_digest,
+        "instructions": request.instructions,
+        "max_output_tokens": request.max_output_tokens,
+        "model": request.model,
+        "parallel_tool_calls": request.parallel_tool_calls,
+        "previous_response_id": request.previous_response_id,
+        "conversation_id": request.conversation.as_ref().map(ResponseConversationParam::id),
+        "reasoning": request.reasoning,
+        "store": request.store,
+        "text": response_text_settings(request.text.as_ref()),
+        "tools": request.tools,
+        "prior_input_tokens": prior_input_tokens,
+        "metadata": request.metadata,
+    });
+    let canonical = crate::sim::canonical::canonical_json(&representation);
+    digest_fields(["responses-resource-v1", canonical.as_str()])
 }
 
 struct ResponseBudget {

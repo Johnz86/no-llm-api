@@ -26,10 +26,16 @@ pub struct ResponseStore {
     inner: Arc<RwLock<IndexMap<String, StoredResponse>>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct StoredResponse {
     pub response: ResponseObject,
     pub turns: Vec<CanonicalTurn>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("response resource '{id}' was derived for different immutable content")]
+pub struct ResponseStoreConflict {
+    pub id: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -48,11 +54,22 @@ impl ResponseStore {
         Self::default()
     }
 
-    pub async fn save(&self, response: ResponseObject, turns: Vec<CanonicalTurn>) {
+    pub async fn save(
+        &self,
+        response: ResponseObject,
+        turns: Vec<CanonicalTurn>,
+    ) -> Result<(), ResponseStoreConflict> {
         let mut guard = self.inner.write().await;
-        guard
-            .entry(response.id.clone())
-            .or_insert(StoredResponse { response, turns });
+        let id = response.id.clone();
+        let candidate = StoredResponse { response, turns };
+        match guard.entry(id.clone()) {
+            indexmap::map::Entry::Vacant(entry) => {
+                entry.insert(candidate);
+                Ok(())
+            }
+            indexmap::map::Entry::Occupied(entry) if entry.get() == &candidate => Ok(()),
+            indexmap::map::Entry::Occupied(_) => Err(ResponseStoreConflict { id }),
+        }
     }
 
     pub async fn get(&self, id: &str) -> Option<ResponseObject> {
@@ -361,10 +378,11 @@ mod tests {
     async fn responses_are_immutable_and_delete_is_explicit() {
         let store = ResponseStore::new();
         let mut first = sample_response_object("resp_test");
-        store.save(first.clone(), Vec::new()).await;
+        store.save(first.clone(), Vec::new()).await.unwrap();
         first.model = "changed-model".to_string();
-        store.save(first, Vec::new()).await;
+        let error = store.save(first, Vec::new()).await.unwrap_err();
 
+        assert_eq!(error.id, "resp_test");
         assert_eq!(store.get("resp_test").await.unwrap().model, "test-model");
         assert_eq!(
             serde_json::to_value(store.delete("resp_test").await.unwrap()).unwrap(),

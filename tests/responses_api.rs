@@ -119,6 +119,151 @@ async fn response_metadata_enforces_the_pinned_string_map_limits() {
 }
 
 #[tokio::test]
+async fn representation_controls_change_resource_identity_not_semantic_selection() {
+    let fixture = fixture(100_000);
+    let base = json!({
+        "model": "mock-reasoner",
+        "input": "Which release should ship?",
+        "reasoning": {"effort": "high"},
+        "store": false
+    });
+    let variants = [
+        base.clone(),
+        {
+            let mut value = base.clone();
+            value["store"] = json!(true);
+            value
+        },
+        {
+            let mut value = base.clone();
+            value["metadata"] = json!({"suite": "resource-identity"});
+            value
+        },
+        {
+            let mut value = base.clone();
+            value["parallel_tool_calls"] = json!(false);
+            value
+        },
+        {
+            let mut value = base;
+            value["reasoning"]["summary"] = json!("auto");
+            value
+        },
+    ];
+
+    let mut plan_digests = std::collections::BTreeSet::new();
+    let mut resource_ids = std::collections::BTreeSet::new();
+    for request in variants {
+        let (status, headers, body) =
+            send(fixture.app.clone(), "POST", "/v1/responses", Some(request)).await;
+        assert_eq!(status, 200, "{body}");
+        let response: Value = serde_json::from_str(&body).unwrap();
+        plan_digests.insert(
+            headers["x-simulate-plan-digest"]
+                .to_str()
+                .unwrap()
+                .to_string(),
+        );
+        resource_ids.insert(response["id"].as_str().unwrap().to_string());
+    }
+
+    assert_eq!(plan_digests.len(), 1);
+    assert_eq!(resource_ids.len(), 5);
+}
+
+#[tokio::test]
+async fn stored_and_stateless_representations_never_share_retrievability() {
+    let fixture = fixture(100_000);
+    let base = json!({
+        "model": "mock-gpt-4o",
+        "input": "Introduce the simulator.",
+        "x_simulate": {"case": "basic-text/concise"}
+    });
+    let mut stored_request = base.clone();
+    stored_request["store"] = json!(true);
+    let (_, stored_headers, stored_body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(stored_request),
+    )
+    .await;
+    let stored: Value = serde_json::from_str(&stored_body).unwrap();
+
+    let mut stateless_request = base;
+    stateless_request["store"] = json!(false);
+    let (_, stateless_headers, stateless_body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(stateless_request),
+    )
+    .await;
+    let stateless: Value = serde_json::from_str(&stateless_body).unwrap();
+
+    assert_eq!(
+        stored_headers["x-simulate-plan-digest"],
+        stateless_headers["x-simulate-plan-digest"]
+    );
+    assert_ne!(stored["id"], stateless["id"]);
+
+    let (status, _, retrieved) = send(
+        fixture.app.clone(),
+        "GET",
+        &format!("/v1/responses/{}", stored["id"].as_str().unwrap()),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(serde_json::from_str::<Value>(&retrieved).unwrap(), stored);
+
+    let (status, _, _) = send(
+        fixture.app,
+        "GET",
+        &format!("/v1/responses/{}", stateless["id"].as_str().unwrap()),
+        None,
+    )
+    .await;
+    assert_eq!(status, 404);
+}
+
+#[tokio::test]
+async fn concurrent_representation_variants_retrieve_their_exact_bodies() {
+    let fixture = fixture(100_000);
+    let requests = (0..32).map(|index| {
+        send(
+            fixture.app.clone(),
+            "POST",
+            "/v1/responses",
+            Some(json!({
+                "model": "mock-gpt-4o",
+                "input": "Introduce the simulator.",
+                "metadata": {"variant": index.to_string()},
+                "store": true,
+                "x_simulate": {"case": "basic-text/concise"}
+            })),
+        )
+    });
+    let created = futures::future::join_all(requests).await;
+    let mut ids = std::collections::BTreeSet::new();
+    for (status, _, body) in created {
+        assert_eq!(status, 200, "{body}");
+        let response: Value = serde_json::from_str(&body).unwrap();
+        assert!(ids.insert(response["id"].as_str().unwrap().to_string()));
+        let (status, _, retrieved) = send(
+            fixture.app.clone(),
+            "GET",
+            &format!("/v1/responses/{}", response["id"].as_str().unwrap()),
+            None,
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert_eq!(serde_json::from_str::<Value>(&retrieved).unwrap(), response);
+    }
+    assert_eq!(ids.len(), 32);
+}
+
+#[tokio::test]
 async fn reasoning_summary_is_public_but_chat_trace_is_absent() {
     let fixture = fixture(1_000);
     let body = json!({

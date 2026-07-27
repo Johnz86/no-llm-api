@@ -625,7 +625,9 @@ async fn create_response(
         ..scenario.as_ref().clone()
     };
     let (timing, fault) = directive.apply(&effective_scenario);
-    let plan_seed = state.seed ^ plan_seed_of(&response.id);
+    let plan_seed = state.seed
+        ^ u64::from_str_radix(&plan.plan_digest, 16)
+            .expect("semantic plan digest is a hexadecimal u64");
     if fault.kind == FaultKind::HttpError && fault_fires(&fault, plan_seed) {
         state.metrics.record_fault();
         return Err(http_fault_error(&fault));
@@ -649,7 +651,13 @@ async fn create_response(
     if request.store {
         let mut turns = canonical.turns.clone();
         turns.push(response_turn(&response));
-        state.responses.save(response.clone(), turns).await;
+        state
+            .responses
+            .save(response.clone(), turns)
+            .await
+            .map_err(|error| {
+                ApiError::server_error(error.to_string()).with_code("response_store_invariant")
+            })?;
     }
 
     let diagnostics = SemanticDiagnostics {
