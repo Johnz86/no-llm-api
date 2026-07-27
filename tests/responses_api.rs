@@ -2,9 +2,47 @@
 
 mod support;
 
+use no_llm_api::http::RouterOptions;
+use no_llm_api::models::{Capabilities, ModelCatalogue, ModelEntry, ModelProfile};
 use serde_json::{Value, json};
 use support::sse::collect_sse_at;
-use support::{assert_error_envelope, fixture, fixture_with_scenario, send, send_with_headers};
+use support::{
+    assert_error_envelope, fixture, fixture_with_options, fixture_with_scenario, send,
+    send_with_headers,
+};
+
+fn limited_fixture(context_window: u32, max_output_tokens: u32) -> support::Fixture {
+    let entry = |id: &str, reasoning: bool| ModelEntry {
+        id: id.to_string(),
+        created: 1_735_689_600,
+        owned_by: "no-llm-api".to_string(),
+        profile: ModelProfile {
+            context_window: Some(context_window),
+            max_output_tokens: Some(max_output_tokens),
+            capabilities: Capabilities {
+                reasoning,
+                reasoning_efforts: if reasoning {
+                    ["low", "medium", "high"].map(str::to_string).to_vec()
+                } else {
+                    Vec::new()
+                },
+                structured_output: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    };
+    fixture_with_options(
+        100_000,
+        RouterOptions {
+            models: ModelCatalogue::from_entries(vec![
+                entry("mock-gpt-4o", false),
+                entry("mock-reasoner", true),
+            ]),
+            ..RouterOptions::default()
+        },
+    )
+}
 
 #[tokio::test]
 async fn explicit_text_plan_renders_a_response_message() {
@@ -884,7 +922,7 @@ async fn state_modes_select_the_same_authored_continuation() {
     .await;
     let replay: Value = serde_json::from_str(&replay_body).unwrap();
 
-    let (_, _, conversation_body) = send(
+    let (status, _, conversation_body) = send(
         fixture.app.clone(),
         "POST",
         "/v1/conversations",
@@ -905,6 +943,7 @@ async fn state_modes_select_the_same_authored_continuation() {
         })),
     )
     .await;
+    assert_eq!(status, 200, "{conversation_body}");
     let conversation: Value = serde_json::from_str(&conversation_body).unwrap();
     let (_, _, conversation_response_body) = send(
         fixture.app,
@@ -2068,6 +2107,183 @@ async fn output_budget_below_the_schema_minimum_is_rejected() {
     let response = assert_error_envelope(&text);
     assert_eq!(response["error"]["param"], "max_output_tokens");
     assert_eq!(response["error"]["code"], "invalid_value");
+}
+
+#[tokio::test]
+async fn model_output_ceiling_rejects_oversized_caps_and_bounds_defaults() {
+    let fixture = limited_fixture(1_000, 16);
+    let base = json!({
+        "model": "mock-reasoner",
+        "input": "Which release should ship?",
+        "reasoning": {"effort": "high", "summary": "auto"},
+        "store": false
+    });
+    let mut oversized = base.clone();
+    oversized["max_output_tokens"] = json!(17);
+    let (status, _, body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(oversized),
+    )
+    .await;
+    assert_eq!(status, 400, "{body}");
+    let error = assert_error_envelope(&body);
+    assert_eq!(error["error"]["param"], "max_output_tokens");
+    assert_eq!(error["error"]["code"], "max_output_tokens_exceeded");
+
+    let mut boundary = base.clone();
+    boundary["max_output_tokens"] = json!(16);
+    let (status, _, body) =
+        send(fixture.app.clone(), "POST", "/v1/responses", Some(boundary)).await;
+    assert_eq!(status, 200, "{body}");
+
+    let (status, _, default_body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(base.clone()),
+    )
+    .await;
+    assert_eq!(status, 200, "{default_body}");
+    let response: Value = serde_json::from_str(&default_body).unwrap();
+    assert_eq!(response["status"], "incomplete");
+    assert_eq!(response["max_output_tokens"], Value::Null);
+    assert_eq!(response["usage"]["output_tokens"], 16);
+    assert_eq!(
+        response["incomplete_details"]["reason"],
+        "max_output_tokens"
+    );
+
+    let mut streamed = base;
+    streamed["stream"] = json!(true);
+    let events = collect_sse_at(fixture.app, "/v1/responses", streamed)
+        .await
+        .chunks();
+    assert_eq!(events.last().unwrap()["type"], "response.incomplete");
+    assert_eq!(events.last().unwrap()["response"], response);
+}
+
+#[tokio::test]
+async fn model_context_window_accepts_the_boundary_and_rejects_excess() {
+    let fixture = limited_fixture(5, 64);
+    let base = json!({
+        "model": "mock-reasoner",
+        "input": "Which release should ship?",
+        "reasoning": {"effort": "high", "summary": "auto"},
+        "store": false
+    });
+    let (status, _, body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(base.clone()),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&body).unwrap()["usage"]["input_tokens"],
+        5
+    );
+
+    let mut oversized = base;
+    oversized["input"] = json!("Which release should ship? Add detail.");
+    oversized["x_simulate"] = json!({"case": "reasoning-effort/release-decision"});
+    let (status, _, body) = send(fixture.app, "POST", "/v1/responses", Some(oversized)).await;
+    assert_eq!(status, 400, "{body}");
+    let error = assert_error_envelope(&body);
+    assert_eq!(error["error"]["param"], "input");
+    assert_eq!(error["error"]["code"], "context_length_exceeded");
+}
+
+#[tokio::test]
+async fn oversized_state_modes_fail_identically_without_mutating_state() {
+    let fixture = limited_fixture(10, 64);
+    let original = "Introduce the simulator.";
+    let (_, _, parent_body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/responses",
+        Some(json!({
+            "model": "mock-gpt-4o",
+            "input": original,
+            "store": true,
+            "x_simulate": {"case": "basic-text/concise"}
+        })),
+    )
+    .await;
+    let parent: Value = serde_json::from_str(&parent_body).unwrap();
+    assert_eq!(fixture.state.responses.snapshot().await.len(), 1);
+
+    let (_, _, conversation_body) = send(
+        fixture.app.clone(),
+        "POST",
+        "/v1/conversations",
+        Some(json!({
+            "items": [
+                {"type": "message", "role": "user", "content": original},
+                parent["output"][0].clone()
+            ]
+        })),
+    )
+    .await;
+    let conversation: Value = serde_json::from_str(&conversation_body).unwrap();
+
+    let requests = [
+        json!({
+            "model": "mock-gpt-4o",
+            "input": original,
+            "previous_response_id": parent["id"],
+            "store": true
+        }),
+        json!({
+            "model": "mock-gpt-4o",
+            "input": [
+                {"type": "message", "role": "user", "content": original},
+                parent["output"][0].clone(),
+                {"type": "message", "role": "user", "content": original}
+            ],
+            "store": true
+        }),
+        json!({
+            "model": "mock-gpt-4o",
+            "input": original,
+            "conversation": conversation["id"],
+            "store": true
+        }),
+    ];
+    let mut errors = Vec::new();
+    for request in requests {
+        let (status, _, body) =
+            send(fixture.app.clone(), "POST", "/v1/responses", Some(request)).await;
+        assert_eq!(status, 400, "{body}");
+        let error = assert_error_envelope(&body);
+        assert_eq!(error["error"]["param"], "input");
+        assert_eq!(error["error"]["code"], "context_length_exceeded");
+        errors.push(body);
+    }
+    assert_eq!(errors[0], errors[1]);
+    assert_eq!(errors[1], errors[2]);
+    assert_eq!(fixture.state.responses.snapshot().await.len(), 1);
+
+    let (status, _, items) = send(
+        fixture.app,
+        "GET",
+        &format!(
+            "/v1/conversations/{}/items?order=asc",
+            conversation["id"].as_str().unwrap()
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{items}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&items).unwrap()["data"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 #[tokio::test]

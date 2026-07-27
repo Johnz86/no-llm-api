@@ -30,7 +30,7 @@ use crate::request_types::ResponseFormat;
 use crate::responses::{
     CreateResponseRequest, ResolvedResponseContext, ResponseContentPart, ResponseInput,
     ResponseInputItem, ResponseItemStatus, ResponseOutputItem, ResponseRole, ResponseTextFormat,
-    render_response_with_context,
+    canonical_input_tokens, render_response_with_context,
 };
 use crate::service::ChatService;
 use crate::service::SemanticDiagnostics;
@@ -535,6 +535,7 @@ async fn create_response(
         .models
         .profile(&request.model)
         .ok_or_else(|| ApiError::model_not_found(&request.model))?;
+    validate_response_output_ceiling(&request, profile.max_output_tokens)?;
     let scenario = state.scenario.load_full();
     let mut canonical = request.canonical_request();
     let mut resolved_context = ResolvedResponseContext::from_request(&request);
@@ -581,6 +582,11 @@ async fn create_response(
         None
     };
     canonical.turns = resolved_context.turns.clone();
+    validate_response_context_window(
+        &resolved_context,
+        profile.context_window,
+        state.service.tokenizer().as_ref(),
+    )?;
     if conversation.is_some() {
         if let Some(delay) = directive.commit_delay_ms {
             tokio::time::sleep(Duration::from_millis(delay.min(10_000))).await;
@@ -599,11 +605,16 @@ async fn create_response(
     )
     .map_err(semantic_plan_error)?;
     validate_response_schema(&request, &plan)?;
+    let effective_output_tokens = match (request.max_output_tokens, profile.max_output_tokens) {
+        (Some(requested), Some(model)) => Some(requested.min(model)),
+        (requested, model) => requested.or(model),
+    };
     let response = render_response_with_context(
         &request,
         &plan,
         state.service.tokenizer().as_ref(),
         &resolved_context,
+        effective_output_tokens,
     );
     let base = model_timing(&state, &request.model).unwrap_or_else(|| scenario.timing.clone());
     let effective_scenario = Scenario {
@@ -938,6 +949,42 @@ fn validate_response_request(request: &CreateResponseRequest) -> Result<(), ApiE
         )
         .with_param("max_output_tokens")
         .with_code("invalid_value"));
+    }
+    Ok(())
+}
+
+fn validate_response_output_ceiling(
+    request: &CreateResponseRequest,
+    model_ceiling: Option<u32>,
+) -> Result<(), ApiError> {
+    if let (Some(requested), Some(ceiling)) = (request.max_output_tokens, model_ceiling)
+        && requested > ceiling
+    {
+        return Err(ApiError::invalid_request(format!(
+            "Invalid value for 'max_output_tokens': the selected model supports at most {ceiling} tokens."
+        ))
+        .with_param("max_output_tokens")
+        .with_code("max_output_tokens_exceeded"));
+    }
+    Ok(())
+}
+
+fn validate_response_context_window(
+    context: &ResolvedResponseContext,
+    context_window: Option<u32>,
+    tokenizer: &tiktoken_rs::CoreBPE,
+) -> Result<(), ApiError> {
+    let Some(context_window) = context_window else {
+        return Ok(());
+    };
+    let input_tokens = canonical_input_tokens(&context.turns, tokenizer)
+        .saturating_add(context.carried_reasoning_tokens);
+    if input_tokens > context_window {
+        return Err(ApiError::invalid_request(format!(
+            "The request has {input_tokens} input tokens, which exceeds the selected model's {context_window}-token context window."
+        ))
+        .with_param("input")
+        .with_code("context_length_exceeded"));
     }
     Ok(())
 }

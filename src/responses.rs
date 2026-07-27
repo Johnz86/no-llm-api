@@ -413,6 +413,7 @@ pub fn render_response(
         plan,
         tokenizer,
         &ResolvedResponseContext::from_request(request),
+        request.max_output_tokens,
     )
 }
 
@@ -421,12 +422,18 @@ pub fn render_response_with_context(
     plan: &SemanticResponsePlan,
     tokenizer: &CoreBPE,
     context: &ResolvedResponseContext,
+    effective_output_tokens: Option<u32>,
 ) -> ResponseObject {
-    let digest = response_resource_digest(request, plan, context.carried_reasoning_tokens);
+    let digest = response_resource_digest(
+        request,
+        plan,
+        context.carried_reasoning_tokens,
+        effective_output_tokens,
+    );
     let identity = Identity::derive(digest, IdentityMode::Derived, &SystemClock);
     let suffix = identity.id.trim_start_matches("chatcmpl-");
     let id = format!("resp_{suffix}");
-    let budget = budget_outputs(request.max_output_tokens, plan, tokenizer);
+    let budget = budget_outputs(effective_output_tokens, plan, tokenizer);
     let status = if budget.exhausted && plan.terminal == TerminalStatus::Completed {
         ResponseStatus::Incomplete
     } else {
@@ -575,12 +582,14 @@ fn response_resource_digest(
     request: &CreateResponseRequest,
     plan: &SemanticResponsePlan,
     carried_reasoning_tokens: u32,
+    effective_output_tokens: Option<u32>,
 ) -> u64 {
     let representation = json!({
         "schema_revision": RESPONSES_SCHEMA_REVISION,
         "plan_digest": plan.plan_digest,
         "instructions": request.instructions,
         "max_output_tokens": request.max_output_tokens,
+        "effective_output_tokens": effective_output_tokens,
         "model": request.model,
         "parallel_tool_calls": request.parallel_tool_calls,
         "previous_response_id": request.previous_response_id,
@@ -594,7 +603,7 @@ fn response_resource_digest(
         "metadata": request.metadata,
     });
     let canonical = crate::sim::canonical::canonical_json(&representation);
-    digest_fields(["responses-resource-v2", canonical.as_str()])
+    digest_fields(["responses-resource-v3", canonical.as_str()])
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
