@@ -1,6 +1,6 @@
 [package]
 name = "no-llm-api"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 rust-version = "1.90"
 description = "Deterministic offline OpenAI-compatible Chat Completions and Responses API simulator"

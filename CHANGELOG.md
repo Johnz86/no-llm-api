@@ -10,6 +10,34 @@ configuration surface moved.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-07-27
+
+### Wire behaviour
+
+- Responses now derive semantic plan identity separately from immutable resource identity. Body
+  projections, persistence, linkage, carried usage, and effective model limits receive distinct
+  resource ids, while streamed and non-streamed forms reconstruct the same terminal object. This
+  correction changes pinned Responses ids, item ids, timestamps, and associated snapshots.
+- `reasoning.encrypted_content` is absent by default and is emitted only through the typed `include`
+  control. The deterministic `enc_v1_...` replay envelope binds the resource, reasoning-token count,
+  and fixture-authored opaque material; old opaque-reasoning snapshots are not replay-compatible.
+- Stateless Responses input accepts ordinary assistant history. Opaque reasoning replay requires a
+  complete adjacent reasoning/message pair and rejects trailing, intervening, duplicated, raw,
+  partial, altered, or mismatched items before selection.
+- Input usage counts canonical turns plus cumulative carried reasoning exactly once across explicit
+  replay, predecessor continuation, and conversations. Model output ceilings and context windows
+  now produce deterministic `max_output_tokens_exceeded` and `context_length_exceeded` errors.
+- The `state-expired` scenario classifies only existing stored predecessors as expired. Unknown and
+  deleted ids consistently return `previous_response_not_found` without changing storage.
+
+### Changed
+
+- Semantic artifact compatibility reports reject new fixture/case candidates that overlap an
+  existing digest-fallback class and identify the added case, affected baseline case, and class.
+  Explicit non-default variant additions remain compatible.
+- The maintained Responses and semantic-fixture documentation now describes the implemented
+  identity, replay, usage, limit, expiry, and compatibility rules in present tense.
+
 ## [1.0.0] - 2026-07-26
 
 ### Wire behaviour

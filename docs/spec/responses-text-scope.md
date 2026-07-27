@@ -38,8 +38,9 @@ The frozen surface contains one generation with these output forms:
 - exact usage with separate input, visible output, and reasoning token counts.
 
 Tool items, hosted tools, MCP, skills, images, audio, realtime sessions, background execution, and
-WebSocket transport remain outside this slice. The types added later must reserve exhaustive enum
-extension points for them without accepting arbitrary pass-through JSON as a shortcut.
+WebSocket transport are outside this contract. Their pinned request controls deserialize as typed
+values where required for forward compatibility, but unsupported behavior fails explicitly instead
+of passing arbitrary JSON through the simulator.
 
 ## Reasoning policy
 
@@ -48,7 +49,7 @@ Only observable public behavior is a compatibility target:
 | Fixture value | Responses destination | Policy |
 | --- | --- | --- |
 | `reasoning_summary` | `reasoning.summary[].text` and summary events | Public and supported when requested. |
-| `reasoning_encrypted` | `reasoning.encrypted_content` | Opaque replay token; never inspected, logged, or rendered as text. |
+| `reasoning_encrypted` | Sealed `reasoning.encrypted_content` when explicitly included | Authored material contributes to an opaque envelope; it is never exposed, logged, or rendered as text. |
 | `reasoning_trace` | Existing Chat `reasoning_content` extension only | Synthetic test data, never mapped into a Responses summary. |
 | `reasoning_tokens` | `usage.output_tokens_details.reasoning_tokens` | Exact fixture override or deterministic tokenizer result. |
 
@@ -56,10 +57,48 @@ Effort is validated against a model capability profile. An exact authored effort
 then an explicitly declared fixture fallback. If neither exists, planning fails with a fixture
 coverage error; the simulator never fabricates a more or less capable answer.
 
+`include` is a closed enum matching the pinned upstream values. This text surface supports only
+`"reasoning.encrypted_content"`; every other known include value fails with `unsupported_parameter`,
+and an unknown include value fails deserialization. Without the supported include, reasoning items
+and stream events omit `encrypted_content`. With it, the simulator emits an `enc_v1_...` envelope
+that seals the response resource digest, the emitted reasoning-token count, and a digest of the
+fixture-authored opaque material. The envelope is deterministic authentication and linkage metadata,
+not encrypted chain-of-thought and not a reversible representation of authored reasoning.
+
 `max_output_tokens` accepts the pinned schema minimum of 16. Reasoning tokens consume the budget
 before visible text or refusal tokens. Exhaustion truncates only on tokenizer boundaries, updates
 usage to the emitted budget, marks output items incomplete, and terminates the response with
 `incomplete_details.reason = "max_output_tokens"` in object and streamed forms.
+
+The selected model profile also limits output and input. A requested output cap above the profile's
+`max_output_tokens` fails with `max_output_tokens_exceeded`; when the request omits the cap, the
+model ceiling is the effective budget. Canonical input tokens plus carried reasoning tokens may
+equal the model's `context_window`; a larger context fails with `context_length_exceeded` before
+planning, storage, or conversation mutation. The same canonical history therefore produces the
+same limit result in stateless replay, predecessor, and conversation modes.
+
+## Identity and usage accounting
+
+Semantic plan identity is derived from the canonical conversation and semantic request controls,
+including model, effort, response format, and requested output budget. It does not change for
+transport, persistence, or representation projections such as streaming, storage, metadata,
+parallel-tool echo state, reasoning-summary projection, or the encrypted-reasoning include. Fault
+selection uses this semantic plan identity, so equivalent representations do not select different
+injected behavior.
+
+Response resource identity is a separate `responses-resource-v3` digest over the semantic plan and
+all state that can change the immutable response body: instructions, request and effective output
+budgets, model, linkage, reasoning/text settings, supported include state, persistence, tools,
+carried reasoning usage, and metadata. Stream transport is excluded because its terminal embedded
+Response equals the non-streamed object. A repeated resource id must map to byte-identical stored
+content; storage returns `response_store_invariant` if that invariant is ever violated.
+
+Input usage is the tokenizer count of the resolved canonical turns plus cumulative carried
+reasoning tokens. Stored predecessors retain canonical turns and cumulative reasoning usage;
+conversation items and explicit replay reconstruct the same values. Each prior reasoning generation
+is counted once, including across multiple generations, and the current generation adds its emitted
+reasoning tokens only to output usage. Stateless replay, predecessor continuation, and conversation
+continuation consequently report equal usage for equal semantic history.
 
 ## Normal event state machine
 
@@ -86,8 +125,8 @@ streams do not use Chat Completions' `[DONE]` sentinel.
 `response.incomplete`, `response.failed`, `response.cancelled`, and `error` are terminal alternatives.
 Authored lifecycle fixtures exercise response errors, incomplete details, response/item status
 separation, staged errors, deliberate drops, and consumer cancellation. Reasoning summary events
-finish before visible output begins in the initial renderer. Later interleaving is allowed only for
-a separately authored case backed by a pinned upstream contract.
+finish before visible output begins. Interleaved reasoning and visible output is outside the pinned
+event contract.
 
 ## Structured-output policy
 
@@ -122,13 +161,16 @@ and the parsed value separately so byte reconstruction and semantic validation r
   in child plan identity, so branches require no counters or request ordering. Missing and deleted
   predecessors fail before planning with `previous_response_not_found`. A `store: false` response
   is stateless and cannot be referenced by id. The `state-expired` scenario keeps stored objects
-  inspectable while making every continuation fail reproducibly with `previous_response_expired`;
-  expiry never consults wall-clock time or mutates storage.
-- Stateless input accepts completed assistant message items and completed reasoning items emitted by
-  this simulator. Replay preserves item ids and content-part framing. Reasoning ciphertext uses the
-  opaque deterministic `enc_<plan-digest>` envelope: canonicalization hashes the envelope as an
-  indivisible string and never parses or exposes hidden reasoning. Missing, altered, duplicated, or
-  mismatched reasoning/message pairs fail against `input` before fixture selection.
+  inspectable while making continuation from an existing object fail reproducibly with
+  `previous_response_expired`; lookup happens first, so unknown and deleted ids remain
+  `previous_response_not_found` under every scenario. Expiry never consults wall-clock time or
+  mutates storage.
+- Stateless input accepts ordinary assistant messages as semantic history without requiring replay
+  metadata. Opaque replay accepts only a completed reasoning item immediately followed by the
+  completed assistant message emitted with it. The intact `enc_v1_...` envelope must authenticate
+  and name the same resource digest as the reasoning item id. Trailing reasoning, intervening items,
+  consecutive reasoning items, missing or partial messages, duplicate ids, raw `reasoning_text`,
+  altered envelopes, and mismatched pairs fail against `input` before fixture selection.
 - Process-local response and conversation stores have no implicit time- or capacity-based eviction.
 - A Response associated with a conversation commits only if the conversation still has the exact
   item generation used to plan it. Overlapping writes may have one winner; every stale writer gets
@@ -157,16 +199,18 @@ accepted.
 Within the new namespace, exact case/variant selection is stable across corpus growth. Digest
 fallback is versioned by dataset revision. `fixtures compatibility-report` compares compiled
 artifacts and fails for changed match/default/fallback assignments, existing output bytes, removed
-variants, or legacy payload bytes while reporting additive variants. Identifiers use named FNV-1a
-digest domains so adding one identifier does not perturb another. File enumeration, map iteration,
-request order, counters, wall time, and system randomness never participate.
+variants, legacy payload bytes, or a new fixture/case that overlaps an existing digest-fallback
+class. Candidate-set findings name the added case, affected baseline case, and overlapping
+interface/model/effort/format class. An added explicit non-default variant is reported but remains
+compatible because it cannot enter case selection. Identifiers use named FNV-1a digest domains so
+adding one identifier does not perturb another. File enumeration, map iteration, request order,
+counters, wall time, and system randomness never participate.
 
 Response output items expose typed identity, kind, and message-content accessors shared by rendering,
 conversation ownership, and routes. Stream schedules carry fault-stage metadata separately from
-their serialized event objects; stage selection never reparses event names. Future item schedulers
-may target the reserved `tool` stage, but must append their own typed events without renumbering or
-renaming existing text/reasoning items. Existing `msg_` and `rs_` identities, output indexes, event
-ordering, and terminal objects are compatibility invariants.
+their serialized event objects; stage selection never reparses event names. The `tool` fault stage
+is reserved and currently has no output-item implementation. Existing `msg_` and `rs_` identities,
+output indexes, event ordering, and terminal objects are compatibility invariants.
 
 ## Executable corpus
 

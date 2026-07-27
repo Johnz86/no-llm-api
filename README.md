@@ -37,12 +37,17 @@ curl http://127.0.0.1:8080/v1/responses \
 ```
 
 It supports text, public reasoning summaries, refusals, validated structured output, and typed SSE
-events with `"stream":true`. `max_output_tokens` uses reasoning-first accounting and returns an
-incomplete response when the budget is exhausted. Responses are stored by default; `"store":false`
-makes a request stateless. Stored objects are retrievable and deletable at
-`/v1/responses/{response_id}`. A later request can name that immutable object through
-`previous_response_id`; the stored turn sequence and parent object participate in deterministic
-selection and identity. Tools remain explicitly unsupported until their implementation slice.
+events with `"stream":true`. Opaque reasoning is absent by default and appears only when `include`
+contains `"reasoning.encrypted_content"`; the returned `enc_v1_...` value is a sealed simulator
+replay envelope, not readable reasoning. `max_output_tokens` uses reasoning-first accounting,
+respects the selected model's output ceiling, and returns an incomplete response when the effective
+budget is exhausted. Inputs that exceed the model's context window fail before planning.
+
+Responses are stored by default; `"store":false` makes a request stateless. Stored objects are
+retrievable and deletable at `/v1/responses/{response_id}`. A later request can name that immutable
+object through `previous_response_id`; ordinary completed assistant messages can also be supplied as
+history. Opaque reasoning replay requires the intact adjacent reasoning/message pair emitted by the
+simulator. Tools remain explicitly unsupported by this text-first surface.
 
 ## Request behaviour
 
@@ -66,9 +71,12 @@ Every request follows the same deterministic pipeline:
    selected.
 
 Derived identity mode makes completion ids, timestamps, payload request ids, fingerprints, response
-bodies, and complete SSE transcripts reproducible. There are no counters, fixture rotation, or
-wall-clock inputs in this mode. The `x-simulate-match` response header reports the matching rung used
-for a request.
+bodies, and complete SSE transcripts reproducible. Semantic plan identity selects authored behavior;
+a separate resource identity includes body-shaping controls, persistence/linkage, carried reasoning
+usage, and the model's effective output budget. Streaming is only a transport choice, so equivalent
+streamed and non-streamed requests share the terminal Response object. There are no counters,
+fixture rotation, or wall-clock inputs in this mode. The `x-simulate-match` response header reports
+the matching rung used for a request.
 
 ## Configuration
 
@@ -333,8 +341,8 @@ The server mirrors the primary Chat Completions endpoints, exposed both at the r
 it works from any working directory.
 
 Chat Completions include usage, tool/function metadata, synthetic reasoning content, finish reasons,
-audio metadata, and refusal text when the fixture supplies them. Responses in `1.0.0` include usage,
-text or refusal parts, public reasoning summaries, opaque encrypted reasoning replay, and structured
+audio metadata, and refusal text when the fixture supplies them. Responses in `1.0.1` include usage,
+text or refusal parts, public reasoning summaries, opt-in opaque reasoning replay, and structured
 text output. Responses tools, image/audio items, MCP, and skills are rejected or remain outside this
 release.
 

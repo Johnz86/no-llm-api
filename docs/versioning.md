@@ -22,8 +22,8 @@ The Responses and Conversations surface is additive and explicitly experimental 
 pinned text/reasoning corpus, item identities, and event ordering are still reviewed as wire
 behavior, but extending that experimental surface does not by itself require `2.0.0`. Declaring the
 surface stable, or incompatibly changing the stable Chat/configuration contract, is the major-version
-boundary. The text/reasoning implementation therefore remains version `1.0.0` for the first
-repository release.
+boundary. Version `1.0.1` corrects the experimental Responses text/reasoning contract while leaving
+the stable `1.0.0` Chat and configuration baseline unchanged.
 
 ## How a consumer pins behaviour
 

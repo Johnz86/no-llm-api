@@ -1,6 +1,6 @@
 {
-  "corpus_version": 1,
-  "captured_on": "2026-07-26",
+  "corpus_version": 2,
+  "captured_on": "2026-07-27",
   "openapi": {
     "source": "https://github.com/openai/openai-openapi/blob/main/openapi.yaml",
     "commit": "5c044be3bf3a42854e99e34616564eeb2124a317",

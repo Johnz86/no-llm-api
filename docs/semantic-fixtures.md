@@ -138,11 +138,13 @@ never exposed by Responses.
 
 Schema-v2 corpus growth cannot alter exact case/variant selection. The compatibility report fails
 when an existing match/default/fallback assignment changes, an existing variant's output bytes move,
-a variant disappears, or any `legacy-*` payload changes; additive variants are reported but allowed.
+a variant disappears, any `legacy-*` payload changes, or a new fixture/case enters a fallback class
+that already contains a baseline case. Each candidate-set finding names the added case, affected
+baseline case, and overlapping interface/model/effort/format class. A new explicit non-default
+variant remains an additive compatible change because it cannot enter case fallback selection.
 Digest fallback is revisioned and may change only with an explicit dataset revision and reviewed
-compatibility report. New output-item
-types append through the typed item/stage boundary; they must not renumber existing message or
-reasoning items in an established case.
+compatibility report. New output-item types append through the typed item/stage boundary; they must
+not renumber existing message or reasoning items in an established case.
 
 ## Semantic compiler kernel
 
@@ -163,5 +165,6 @@ when `X-Simulate-Case` or `x_simulate.case` is present.
 
 `sim::artifact` sorts every unordered input, rejects overlapping equal-priority cases and unknown
 or incapable models, tokenizes reasoning and visible output independently, and emits compiler,
-selection, tokenizer, and source revisions. The resulting JSON bytes reproduce across shuffled
-source enumeration and fresh compiler processes.
+selection, tokenizer, and source revisions. Its compatibility report distinguishes existing-byte,
+default/fallback, removal, additive-variant, legacy-byte, and overlapping fallback-candidate changes.
+The resulting JSON bytes reproduce across shuffled source enumeration and fresh compiler processes.

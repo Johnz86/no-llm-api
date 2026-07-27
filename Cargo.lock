@@ -1549,7 +1549,7 @@ dependencies = [
 
 [[package]]
 name = "no-llm-api"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "arc-swap",
