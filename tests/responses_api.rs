@@ -1266,6 +1266,28 @@ async fn state_expired_scenario_rejects_an_existing_predecessor_reproducibly() {
         10_000,
         no_llm_api::sim::scenario::Scenario::resolve("state-expired").unwrap(),
     );
+    let missing_request = json!({
+        "model": "mock-gpt-4o",
+        "input": "Correction: use exactly five words.",
+        "previous_response_id": "resp_missing"
+    });
+    let mut missing_errors = Vec::new();
+    for _ in 0..2 {
+        let (status, _, text) = send(
+            fixture.app.clone(),
+            "POST",
+            "/v1/responses",
+            Some(missing_request.clone()),
+        )
+        .await;
+        assert_eq!(status, 404);
+        let error = assert_error_envelope(&text);
+        assert_eq!(error["error"]["param"], "previous_response_id");
+        assert_eq!(error["error"]["code"], "previous_response_not_found");
+        missing_errors.push(text);
+    }
+    assert_eq!(missing_errors[0], missing_errors[1]);
+
     let (status, _, text) = send(
         fixture.app.clone(),
         "POST",
@@ -1291,23 +1313,53 @@ async fn state_expired_scenario_rejects_an_existing_predecessor_reproducibly() {
     assert_eq!(status, 200);
     assert_eq!(serde_json::from_str::<Value>(&retrieved).unwrap(), parent);
 
+    let continuation = json!({
+        "model": "mock-gpt-4o",
+        "input": "Correction: use exactly five words.",
+        "previous_response_id": parent_id
+    });
+    let mut expired_errors = Vec::new();
     for _ in 0..2 {
         let (status, _, text) = send(
             fixture.app.clone(),
             "POST",
             "/v1/responses",
-            Some(json!({
-                "model": "mock-gpt-4o",
-                "input": "Correction: use exactly five words.",
-                "previous_response_id": parent_id
-            })),
+            Some(continuation.clone()),
         )
         .await;
         assert_eq!(status, 404);
         let error = assert_error_envelope(&text);
         assert_eq!(error["error"]["param"], "previous_response_id");
         assert_eq!(error["error"]["code"], "previous_response_expired");
+        expired_errors.push(text);
     }
+    assert_eq!(expired_errors[0], expired_errors[1]);
+
+    let (status, _, _) = send(
+        fixture.app.clone(),
+        "DELETE",
+        &format!("/v1/responses/{parent_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    let mut deleted_errors = Vec::new();
+    for _ in 0..2 {
+        let (status, _, text) = send(
+            fixture.app.clone(),
+            "POST",
+            "/v1/responses",
+            Some(continuation.clone()),
+        )
+        .await;
+        assert_eq!(status, 404);
+        let error = assert_error_envelope(&text);
+        assert_eq!(error["error"]["param"], "previous_response_id");
+        assert_eq!(error["error"]["code"], "previous_response_not_found");
+        deleted_errors.push(text);
+    }
+    assert_eq!(deleted_errors[0], deleted_errors[1]);
 }
 
 #[tokio::test]

@@ -540,11 +540,6 @@ async fn create_response(
     let mut canonical = request.canonical_request();
     let mut resolved_context = ResolvedResponseContext::from_request(&request);
     if let Some(previous_response_id) = request.previous_response_id.as_deref() {
-        if scenario.state.expire_previous_response {
-            return Err(ApiError::not_found(previous_response_id)
-                .with_param("previous_response_id")
-                .with_code("previous_response_expired"));
-        }
         let stored = state
             .responses
             .get_stored(previous_response_id)
@@ -554,6 +549,11 @@ async fn create_response(
                     .with_param("previous_response_id")
                     .with_code("previous_response_not_found")
             })?;
+        if scenario.state.expire_previous_response {
+            return Err(ApiError::not_found(previous_response_id)
+                .with_param("previous_response_id")
+                .with_code("previous_response_expired"));
+        }
         resolved_context.prepend(&stored.turns, stored.carried_reasoning_tokens);
         merge_response_context(
             &mut canonical.context,
