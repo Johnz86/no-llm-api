@@ -105,6 +105,10 @@ fn compatibility_report_command_is_machine_readable_and_clean_for_same_artifact(
     let value: serde_json::Value = serde_json::from_slice(&report.stdout).unwrap();
     assert_eq!(value["compatible"], true);
     assert_eq!(value["fallback_assignment_changes"], serde_json::json!([]));
+    assert_eq!(
+        value["fallback_candidate_set_changes"],
+        serde_json::json!([])
+    );
     assert_eq!(value["legacy_byte_changes"], serde_json::json!([]));
 }
 

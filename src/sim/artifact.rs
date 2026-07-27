@@ -44,10 +44,27 @@ pub struct CompatibilityReport {
     pub baseline_digest: String,
     pub candidate_digest: String,
     pub fallback_assignment_changes: Vec<String>,
+    pub fallback_candidate_set_changes: Vec<FallbackCandidateSetChange>,
     pub changed_variant_bytes: Vec<String>,
     pub removed_variants: Vec<String>,
     pub added_variants: Vec<String>,
     pub legacy_byte_changes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FallbackCandidateSetChange {
+    pub added_case: String,
+    pub affected_baseline_case: String,
+    pub fallback_class: FallbackClass,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FallbackClass {
+    pub interfaces: Vec<Interface>,
+    pub any_model: bool,
+    pub models: Vec<String>,
+    pub reasoning_effort: Option<String>,
+    pub response_format: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -136,6 +153,8 @@ impl SemanticArtifact {
         let candidate_fallbacks = fallback_assignments(&candidate.fixtures);
         let fallback_assignment_changes =
             changed_map_keys(&baseline_fallbacks, &candidate_fallbacks);
+        let fallback_candidate_set_changes =
+            fallback_candidate_set_changes(&self.fixtures, &candidate.fixtures);
         let baseline_variants = variant_bytes(self);
         let candidate_variants = variant_bytes(candidate);
         let removed_variants = baseline_variants
@@ -156,6 +175,7 @@ impl SemanticArtifact {
             .cloned()
             .collect::<Vec<_>>();
         let compatible = fallback_assignment_changes.is_empty()
+            && fallback_candidate_set_changes.is_empty()
             && changed_variant_bytes.is_empty()
             && removed_variants.is_empty()
             && legacy_byte_changes.is_empty();
@@ -164,12 +184,108 @@ impl SemanticArtifact {
             baseline_digest: self.digest(),
             candidate_digest: candidate.digest(),
             fallback_assignment_changes,
+            fallback_candidate_set_changes,
             changed_variant_bytes,
             removed_variants,
             added_variants,
             legacy_byte_changes,
         }
     }
+}
+
+fn fallback_candidate_set_changes(
+    baseline: &[SemanticFixture],
+    candidate: &[SemanticFixture],
+) -> Vec<FallbackCandidateSetChange> {
+    let baseline_cases = baseline
+        .iter()
+        .flat_map(|fixture| {
+            fixture
+                .cases
+                .iter()
+                .map(move |case| (case_selector(fixture, case), fixture, case))
+        })
+        .collect::<Vec<_>>();
+    let baseline_selectors = baseline_cases
+        .iter()
+        .map(|(selector, _, _)| selector.as_str())
+        .collect::<BTreeSet<_>>();
+    candidate
+        .iter()
+        .flat_map(|fixture| {
+            let baseline_selectors = &baseline_selectors;
+            fixture.cases.iter().filter_map(move |case| {
+                let selector = case_selector(fixture, case);
+                (!baseline_selectors.contains(selector.as_str()))
+                    .then_some((selector, fixture, case))
+            })
+        })
+        .flat_map(|(added_case, candidate_fixture, candidate_case)| {
+            baseline_cases
+                .iter()
+                .filter_map(move |(selector, fixture, case)| {
+                    fallback_class(fixture, case, candidate_fixture, candidate_case).map(
+                        |fallback_class| FallbackCandidateSetChange {
+                            added_case: added_case.clone(),
+                            affected_baseline_case: selector.clone(),
+                            fallback_class,
+                        },
+                    )
+                })
+        })
+        .collect()
+}
+
+fn case_selector(fixture: &SemanticFixture, case: &SemanticCase) -> String {
+    format!("{}/{}", fixture.id, case.id)
+}
+
+fn fallback_class(
+    left_fixture: &SemanticFixture,
+    left_case: &SemanticCase,
+    right_fixture: &SemanticFixture,
+    right_case: &SemanticCase,
+) -> Option<FallbackClass> {
+    let interfaces = effective_interfaces(left_fixture, left_case)
+        .intersection(&effective_interfaces(right_fixture, right_case))
+        .copied()
+        .collect::<Vec<_>>();
+    if interfaces.is_empty() {
+        return None;
+    }
+    let any_model =
+        left_fixture.match_spec.models.is_empty() && right_fixture.match_spec.models.is_empty();
+    let models = if left_fixture.match_spec.models.is_empty() {
+        right_fixture.match_spec.models.clone()
+    } else if right_fixture.match_spec.models.is_empty() {
+        left_fixture.match_spec.models.clone()
+    } else {
+        left_fixture
+            .match_spec
+            .models
+            .iter()
+            .filter(|model| right_fixture.match_spec.models.contains(*model))
+            .cloned()
+            .collect()
+    };
+    if !any_model && models.is_empty() {
+        return None;
+    }
+    let response_format = match (
+        left_case.constraints.response_format.as_ref(),
+        right_case.constraints.response_format.as_ref(),
+    ) {
+        (Some(left), Some(right)) if left != right => return None,
+        (Some(value), _) | (_, Some(value)) => Some(value.clone()),
+        (None, None) => None,
+    };
+    Some(FallbackClass {
+        interfaces,
+        any_model,
+        models,
+        reasoning_effort: None,
+        response_format,
+    })
 }
 
 fn fallback_assignments(fixtures: &[SemanticFixture]) -> BTreeMap<String, String> {
@@ -462,6 +578,7 @@ mod tests {
         assert_eq!(expected, actual);
         assert_eq!(expected.to_bytes(), actual.to_bytes());
         assert_eq!(expected.digest(), actual.digest());
+        assert!(expected.compatibility_report(&actual).compatible);
     }
 
     #[test]
@@ -587,6 +704,67 @@ mod tests {
         assert_eq!(
             report.legacy_byte_changes,
             ["legacy-markdown/deployment-checklist/imported"]
+        );
+    }
+
+    #[test]
+    fn compatibility_report_rejects_fallback_candidate_set_growth() {
+        let fixtures = builtin_fixtures();
+        let baseline = artifact(&fixtures);
+        let mut candidate_fixtures = fixtures.clone();
+        let mut added = fixtures
+            .iter()
+            .find(|fixture| fixture.id == "basic-text")
+            .unwrap()
+            .clone();
+        added.id = "additional-text".to_string();
+        added.match_spec.turns.last_mut().unwrap().text = "An unmatched prompt.".to_string();
+        candidate_fixtures.push(added);
+
+        let report = baseline.compatibility_report(&artifact(&candidate_fixtures));
+
+        assert!(!report.compatible);
+        assert!(!report.fallback_candidate_set_changes.is_empty());
+        assert!(
+            report
+                .fallback_candidate_set_changes
+                .iter()
+                .all(|change| change.added_case == "additional-text/concise")
+        );
+        assert!(report.fallback_candidate_set_changes.iter().any(|change| {
+            change
+                .fallback_class
+                .interfaces
+                .contains(&Interface::Responses)
+        }));
+        assert!(report.fallback_candidate_set_changes.iter().any(|change| {
+            change.affected_baseline_case == "basic-text/concise"
+                && change.fallback_class.models == ["mock-gpt-4o", "mock-gpt-4o-mini"]
+        }));
+    }
+
+    #[test]
+    fn compatibility_report_allows_cases_outside_existing_fallback_classes() {
+        let mut baseline_fixture = builtin_fixtures()
+            .into_iter()
+            .find(|fixture| fixture.id == "basic-text")
+            .unwrap();
+        baseline_fixture.interfaces = vec![Interface::ChatCompletions];
+        baseline_fixture.cases[0].constraints.interfaces = vec![Interface::ChatCompletions];
+        let baseline = artifact(&[baseline_fixture.clone()]);
+        let mut added = baseline_fixture.clone();
+        added.id = "responses-only-text".to_string();
+        added.interfaces = vec![Interface::Responses];
+        added.cases[0].constraints.interfaces = vec![Interface::Responses];
+        added.match_spec.turns.last_mut().unwrap().text = "An unmatched prompt.".to_string();
+
+        let report = baseline.compatibility_report(&artifact(&[baseline_fixture, added]));
+
+        assert!(report.compatible);
+        assert!(report.fallback_candidate_set_changes.is_empty());
+        assert_eq!(
+            report.added_variants,
+            ["responses-only-text/concise/default"]
         );
     }
 }
